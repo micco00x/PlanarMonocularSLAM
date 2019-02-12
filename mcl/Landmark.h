@@ -1,12 +1,11 @@
 #pragma once
-#include <fstream>
 #include <Eigen/Dense>
+#include "utils.h"
 
 namespace mcl {
     struct Landmark {
         unsigned int id;
         Eigen::Vector3f position;
-        //float appearance[10];
-        Eigen::Matrix<float, 10, 1> appearance;
+        Eigen::Matrix<float, mcl::APPEARANCE_SIZE, 1> appearance;
     };
 }
