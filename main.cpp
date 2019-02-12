@@ -16,7 +16,6 @@ int main() {
     std::string dummy_string;
 
     mcl::Camera camera;
-    Eigen::Matrix4f camera_transform_rf_robot;
     std::vector<mcl::Landmark> landmarks;
 
     std::vector<Eigen::Vector3f> odom_trajectory;
@@ -30,7 +29,7 @@ int main() {
     camera_file >> camera.matrix;
     getline(camera_file, dummy_string);
     getline(camera_file, dummy_string);
-    camera_file >> camera_transform_rf_robot;
+    camera_file >> camera.transform_rf_parent;
     camera_file >> dummy_string >> camera.lambda_near;
     camera_file >> dummy_string >> camera.lambda_far;
     camera_file >> dummy_string >> camera.width;
