@@ -12,6 +12,17 @@ end
 
 fclose(dataset_trajectories_file);
 
+% Reading trajectory from SLAM:
+slam_trajectory_file = fopen('../bin/slam.dat');
+slam_trajectory = [];
+
+while ~feof(slam_trajectory_file)
+    A = fscanf(slam_trajectory_file, '%f%f%f', [1 3]);
+    slam_trajectory = [slam_trajectory; A];
+end
+
+fclose(slam_trajectory_file);
+
 % Reading landmarks from dataset:
 dataset_world_file = fopen('../dataset/world.dat', 'r');
 landmarks = [];
@@ -26,13 +37,14 @@ fclose(dataset_world_file);
 
 % Plotting the data:
 plot(gt_trajectory(:,1), gt_trajectory(:,2), 'g', ...
+     slam_trajectory(:,1), slam_trajectory(:,2), 'r', ...
      odom_trajectory(:,1), odom_trajectory(:,2), 'k', ...
      landmarks(:,1), landmarks(:,2), 'go', 'MarkerSize', 2.5);
 
 title('PlanarMonocularSLAM')
 xlabel('x');
 ylabel('y');
-legend({'Ground Truth', 'Odometry', 'Landmarks (GT)'},'Location','southwest');
+legend({'Ground Truth', 'SLAM', 'Odometry', 'Landmarks (GT)'},'Location','southwest');
 grid on;
 grid minor;
 

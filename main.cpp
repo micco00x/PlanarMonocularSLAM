@@ -9,6 +9,7 @@
 #include "mcl/Landmark.h"
 #include "mcl/Measurement.h"
 
+#include "mcl/ekf.h"
 #include "utils.h"
 
 int main() {
@@ -66,6 +67,28 @@ int main() {
             v_meas.push_back(meas);
         }
         measurements.push_back(v_meas);
+    }
+
+    // EKF:
+    std::ofstream slam_file("bin/slam.dat");
+    Eigen::Vector3f unicycle_pose_estimate = odom_trajectory[0];
+    Eigen::Matrix3f covariance_estimate = 10.0f * Eigen::Matrix3f::Identity();
+    for (int k = 1; k < NUM_MEASUREMENTS; ++k) {
+        std::cout << "Iteration " << k << std::endl;
+        Eigen::Vector3f prev_odom_pose = odom_trajectory[k-1];
+        Eigen::Vector3f curr_odom_pose = odom_trajectory[k];
+
+        Eigen::Vector2f displacement((curr_odom_pose.head(2) - prev_odom_pose.head(2)).norm(),
+                                     curr_odom_pose[2] - prev_odom_pose[2]);
+
+        mcl::ekf::predict(unicycle_pose_estimate, covariance_estimate, displacement);
+        mcl::ekf::update(gt_trajectory[k], unicycle_pose_estimate, covariance_estimate, landmarks, measurements[k], camera);
+
+        std::cout << "\tGround truth: " << gt_trajectory[k].transpose() << std::endl;
+        std::cout << "\tEstimate: " << unicycle_pose_estimate.transpose() << std::endl;
+        std::cout << "\tdiff: " << gt_trajectory[k].transpose() - unicycle_pose_estimate.transpose() << std::endl;
+
+        slam_file << unicycle_pose_estimate.transpose() << std::endl;
     }
 
     return 0;
