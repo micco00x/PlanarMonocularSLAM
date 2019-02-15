@@ -2,6 +2,7 @@
 #include <fstream>
 #include <iomanip>
 #include <vector>
+#include <map>
 
 #include <Eigen/Dense>
 
@@ -9,7 +10,7 @@
 #include "mcl/Landmark.h"
 #include "mcl/Measurement.h"
 
-#include "mcl/ekf.h"
+#include "mcl/slam.h"
 #include "utils.h"
 
 int main() {
@@ -69,10 +70,12 @@ int main() {
         measurements.push_back(v_meas);
     }
 
-    // EKF:
-    std::ofstream slam_file("bin/slam.dat");
-    Eigen::Vector3f unicycle_pose_estimate = odom_trajectory[0];
-    Eigen::Matrix3f covariance_estimate = 10.0f * Eigen::Matrix3f::Identity();
+    // SLAM:
+    std::ofstream slam_file("bin/slam_trajectory.dat");
+    std::map<int, int> id_to_state_map;
+    std::vector<int> state_to_id_map;
+    Eigen::VectorXf unicycle_pose_estimate = odom_trajectory[0];
+    Eigen::MatrixXf covariance_estimate = 10.0f * Eigen::Matrix3f::Identity();
     for (int k = 1; k < NUM_MEASUREMENTS; ++k) {
         std::cout << "Iteration " << k << std::endl;
         Eigen::Vector3f prev_odom_pose = odom_trajectory[k-1];
@@ -81,14 +84,24 @@ int main() {
         Eigen::Vector2f displacement((curr_odom_pose.head(2) - prev_odom_pose.head(2)).norm(),
                                      curr_odom_pose[2] - prev_odom_pose[2]);
 
-        mcl::ekf::predict(unicycle_pose_estimate, covariance_estimate, displacement);
-        mcl::ekf::update(gt_trajectory[k], unicycle_pose_estimate, covariance_estimate, landmarks, measurements[k], camera);
+        mcl::slam::predict(unicycle_pose_estimate, covariance_estimate,
+                          displacement);
+        //std::cout << "\tPREDICT: " << unicycle_pose_estimate.transpose() << std::endl;
+        mcl::slam::update(gt_trajectory[k],
+                         unicycle_pose_estimate, covariance_estimate,
+                         landmarks, measurements[k], camera,
+                         id_to_state_map, state_to_id_map);
 
         std::cout << "\tGround truth: " << gt_trajectory[k].transpose() << std::endl;
-        std::cout << "\tEstimate: " << unicycle_pose_estimate.transpose() << std::endl;
-        std::cout << "\tdiff: " << gt_trajectory[k].transpose() - unicycle_pose_estimate.transpose() << std::endl;
+        std::cout << "\tUPDATE: " << unicycle_pose_estimate.transpose() << std::endl;
+        std::cout << "\tdiff: " << gt_trajectory[k].transpose() - unicycle_pose_estimate.head(3).transpose() << std::endl;
 
-        slam_file << unicycle_pose_estimate.transpose() << std::endl;
+        slam_file << unicycle_pose_estimate.head(3).transpose() << std::endl;
+    }
+
+    std::ofstream slam_landmarks_file("bin/slam_landmarks.dat");
+    for (int k = 3; k < unicycle_pose_estimate.rows(); k += 2) {
+        slam_landmarks_file << unicycle_pose_estimate.segment(k, 2).transpose() << std::endl;
     }
 
     return 0;
