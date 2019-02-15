@@ -64,9 +64,12 @@ namespace mcl {
                                                                    -std::cos(estimated_pose[2]), -std::sin(estimated_pose[2]);
 
             // GT transform:
-            Eigen::Matrix2f gt_rotation_world2robot;
-            gt_rotation_world2robot <<  std::cos(gt_pose[2]), std::sin(gt_pose[2]),
-                                       -std::sin(gt_pose[2]), std::cos(gt_pose[2]);
+            Eigen::Matrix4f gt_transform_robot2world;
+            gt_transform_robot2world <<  std::cos(gt_pose[2]), -std::sin(gt_pose[2]), 0.0f, gt_pose[0],
+                                         std::sin(gt_pose[2]),  std::cos(gt_pose[2]), 0.0f, gt_pose[1],
+                                                         0.0f,                  0.0f, 1.0f,       0.0f,
+                                                         0.0f,                  0.0f, 0.0f,       1.0f;
+            Eigen::Matrix4f gt_transform_world2camera = (gt_transform_robot2world * camera.transform_rf_parent).inverse();
 
             for (const auto& meas : measurements) {
                 int meas_idx = &meas - &measurements[0];
@@ -77,8 +80,17 @@ namespace mcl {
                 float estimated_bearing = std::atan2(estimated_landmark_position_rf_robot.y(), estimated_landmark_position_rf_robot.x());
                 estimated_bearings[meas_idx] = estimated_bearing;
 
-                // Compute bearing from measurement:
-                Eigen::Vector2f gt_landmark_position_rf_robot = gt_rotation_world2robot * (gt_landmark_position - gt_pose.head(2));
+                // Compute bearing from measurement (simulating a depth sensor):
+                float f  = camera.matrix(0, 0);
+                float u0 = camera.matrix(0, 2);
+                float v0 = camera.matrix(1, 2);
+                float depth = (gt_transform_world2camera *
+                    Eigen::Vector4f(landmarks[meas.gt_landmark_id].position.x(),
+                                    landmarks[meas.gt_landmark_id].position.y(),
+                                    landmarks[meas.gt_landmark_id].position.z(),
+                                    1.0f)).z();
+                Eigen::Vector4f gt_landmark_position_rf_camera((meas.u - u0) * depth / f, (meas.v - v0) * depth / f, depth, 1.0f);
+                Eigen::Vector4f gt_landmark_position_rf_robot = camera.transform_rf_parent * gt_landmark_position_rf_camera;
                 float gt_bearing = std::atan2(gt_landmark_position_rf_robot.y(), gt_landmark_position_rf_robot.x());
                 gt_bearings[meas_idx] = gt_bearing;
 
