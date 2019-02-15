@@ -97,8 +97,7 @@ namespace mcl {
                 Eigen::Matrix<float, 2, 3> mr;
                 mr.block<2, 2>(0, 0) = -estimated_rotation_world2robot;
                 mr.block<2, 1>(0, 2) = estimated_derivative_transpose_rotation_world2robot * (gt_landmark_position - estimated_pose.head(2));
-                Eigen::Matrix<float, 1, 3> jacobian_meas = 1.0f /
-                    (std::pow(estimated_landmark_position_rf_robot.x(), 2.0f) + std::pow(estimated_landmark_position_rf_robot.y(), 2.0f)) *
+                Eigen::Matrix<float, 1, 3> jacobian_meas = 1.0f / estimated_landmark_position_rf_robot.squaredNorm() *
                     Eigen::Vector2f(-estimated_landmark_position_rf_robot.y(), estimated_landmark_position_rf_robot.x()).transpose() * mr;
 
                 jacobian_measurements.block<1, 3>(meas_idx, 0) = jacobian_meas;
