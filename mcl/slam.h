@@ -64,8 +64,6 @@ namespace mcl {
             Eigen::Matrix4f gt_transform_world2camera = (gt_transform_robot2world * camera.transform_rf_parent).inverse();
 
             int tot_measurements_known_landmarks = 0;
-            std::vector<float> gt_bearings;
-            std::vector<float> estimated_bearings;
 
             std::vector<Eigen::Vector4f> gt_landmark_position_rf_robot_vector;
 
@@ -85,6 +83,8 @@ namespace mcl {
             }
             const int number_of_unknown_landmarks = id_unknown_landmarks.size();
 
+            Eigen::VectorXf gt_bearings(tot_measurements_known_landmarks);
+            Eigen::VectorXf estimated_bearings(tot_measurements_known_landmarks);
             Eigen::MatrixXf jacobian_measurements(tot_measurements_known_landmarks, estimated_state.rows());
 
             int k = 0;
@@ -109,11 +109,11 @@ namespace mcl {
                     Eigen::Vector2f estimated_landmark_position = estimated_state.segment(3 + 2 * state_map_it->second, 2);
                     Eigen::Vector2f estimated_landmark_position_rf_robot = estimated_rotation_world2robot * (estimated_landmark_position - estimated_state.head(2));
                     float estimated_bearing = std::atan2(estimated_landmark_position_rf_robot.y(), estimated_landmark_position_rf_robot.x());
-                    estimated_bearings.push_back(estimated_bearing);
+                    estimated_bearings[k] = estimated_bearing;
 
                     // Compute bearing from measurement (using simulated depth sensor):
                     float gt_bearing = std::atan2(gt_landmark_position_rf_robot.y(), gt_landmark_position_rf_robot.x());
-                    gt_bearings.push_back(gt_bearing);
+                    gt_bearings[k] = gt_bearing;
 
                     // Compute partial derivative of the landmark (rf_robot) wrt the robot:
                     Eigen::Matrix<float, 2, 3> derivative_landmark_wrt_robot_rf_robot;
@@ -139,7 +139,7 @@ namespace mcl {
                 const float measurement_noise = 0.01f;
                 Eigen::MatrixXf covariance_measurements = Eigen::MatrixXf::Identity(tot_measurements_known_landmarks, tot_measurements_known_landmarks) * measurement_noise;
                 Eigen::MatrixXf kalman_gain_matrix = covariance_estimate * jacobian_measurements.transpose() * (jacobian_measurements * covariance_estimate * jacobian_measurements.transpose() + covariance_measurements).inverse();
-                estimated_state.noalias() += kalman_gain_matrix * (Eigen::Map<Eigen::VectorXf>(gt_bearings.data(), gt_bearings.size()) - Eigen::Map<Eigen::VectorXf>(estimated_bearings.data(), estimated_bearings.size()));
+                estimated_state.noalias() += kalman_gain_matrix * (gt_bearings - estimated_bearings);
                 covariance_estimate = (Eigen::MatrixXf::Identity(estimated_state.rows(), estimated_state.rows()) - kalman_gain_matrix * jacobian_measurements) * covariance_estimate;
             }
 
