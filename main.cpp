@@ -81,11 +81,7 @@ int main() {
         Eigen::Vector3f prev_odom_pose = odom_trajectory[k-1];
         Eigen::Vector3f curr_odom_pose = odom_trajectory[k];
 
-        Eigen::Vector2f displacement((curr_odom_pose.head(2) - prev_odom_pose.head(2)).norm(),
-                                     curr_odom_pose[2] - prev_odom_pose[2]);
-
-        mcl::slam::predict(unicycle_pose_estimate, covariance_estimate,
-                          displacement);
+        mcl::slam::predict(unicycle_pose_estimate, covariance_estimate, curr_odom_pose - prev_odom_pose);
         //std::cout << "\tPREDICT: " << unicycle_pose_estimate.transpose() << std::endl;
         mcl::slam::update(gt_trajectory[k],
                          unicycle_pose_estimate, covariance_estimate,
@@ -93,7 +89,7 @@ int main() {
                          id_to_state_map, state_to_id_map);
 
         std::cout << "\tGround truth: " << gt_trajectory[k].transpose() << std::endl;
-        std::cout << "\tUPDATE: " << unicycle_pose_estimate.transpose() << std::endl;
+        std::cout << "\tUPDATE: " << unicycle_pose_estimate.head(3).transpose() << std::endl;
         std::cout << "\tdiff: " << gt_trajectory[k].transpose() - unicycle_pose_estimate.head(3).transpose() << std::endl;
 
         slam_file << unicycle_pose_estimate.head(3).transpose() << std::endl;
