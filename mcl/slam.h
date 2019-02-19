@@ -1,6 +1,7 @@
 #include <set>
 
 #include <Eigen/Dense>
+#include <Eigen/Sparse>
 
 #include "Camera.h"
 #include "Landmark.h"
@@ -85,7 +86,7 @@ namespace mcl {
 
             Eigen::VectorXf gt_bearings(tot_measurements_known_landmarks);
             Eigen::VectorXf estimated_bearings(tot_measurements_known_landmarks);
-            Eigen::MatrixXf jacobian_measurements(tot_measurements_known_landmarks, estimated_state.rows());
+            Eigen::MatrixXf jacobian_measurements = Eigen::MatrixXf::Zero(tot_measurements_known_landmarks, estimated_state.rows());
 
             int k = 0;
             for (const auto& meas : measurements) {
@@ -124,20 +125,16 @@ namespace mcl {
                     Eigen::Matrix<float, 1, 2> derivative_atan_wrt_landmark = 1.0f / estimated_landmark_position_rf_robot.squaredNorm() *
                         Eigen::Vector2f(-estimated_landmark_position_rf_robot.y(), estimated_landmark_position_rf_robot.x()).transpose();
 
-                    // Compute partial derivative of atan wrt both robot and landmark (rf_world):
-                    Eigen::MatrixXf jacobian_meas = Eigen::MatrixXf::Zero(1, estimated_state.rows());
-                    jacobian_meas.block<1, 3>(0, 0) = derivative_atan_wrt_landmark * derivative_landmark_wrt_robot_rf_robot;
-                    jacobian_meas.block<1, 2>(0, 3 + 2 * state_map_it->second) = derivative_atan_wrt_landmark * estimated_rotation_world2robot;
-
-                    // Update full jacobian (atan wrt state):
-                    jacobian_measurements.block(k, 0, jacobian_meas.rows(), jacobian_meas.cols()) = jacobian_meas;
+                    // Compute partial derivative of atan wrt state (both robot and landmark):
+                    jacobian_measurements.block<1, 3>(k, 0) = derivative_atan_wrt_landmark * derivative_landmark_wrt_robot_rf_robot;
+                    jacobian_measurements.block<1, 2>(k, 3 + 2 * state_map_it->second) = derivative_atan_wrt_landmark * estimated_rotation_world2robot;
                     ++k;
                 }
             }
 
             if (tot_measurements_known_landmarks > 0) {
                 const float measurement_noise = 0.01f;
-                Eigen::MatrixXf covariance_measurements = Eigen::MatrixXf::Identity(tot_measurements_known_landmarks, tot_measurements_known_landmarks) * measurement_noise;
+                const Eigen::MatrixXf covariance_measurements = measurement_noise * Eigen::MatrixXf::Identity(tot_measurements_known_landmarks, tot_measurements_known_landmarks);
                 Eigen::MatrixXf kalman_gain_matrix = covariance_estimate * jacobian_measurements.transpose() * (jacobian_measurements * covariance_estimate * jacobian_measurements.transpose() + covariance_measurements).inverse();
                 estimated_state.noalias() += kalman_gain_matrix * (gt_bearings - estimated_bearings);
                 covariance_estimate = (Eigen::MatrixXf::Identity(estimated_state.rows(), estimated_state.rows()) - kalman_gain_matrix * jacobian_measurements) * covariance_estimate;
