@@ -75,7 +75,7 @@ int main() {
     std::map<int, int> id_to_state_map;
     std::vector<int> state_to_id_map;
     Eigen::VectorXf unicycle_pose_estimate = odom_trajectory[0];
-    Eigen::MatrixXf covariance_estimate = 10.0f * Eigen::Matrix3f::Identity();
+    Eigen::MatrixXf covariance_estimate = Eigen::Matrix3f::Identity();
     for (int k = 1; k < NUM_MEASUREMENTS; ++k) {
         std::cout << "Iteration " << k << std::endl;
         Eigen::Vector3f prev_odom_pose = odom_trajectory[k-1];
@@ -96,8 +96,8 @@ int main() {
     }
 
     std::ofstream slam_landmarks_file("bin/slam_landmarks.dat");
-    for (int k = 3; k < unicycle_pose_estimate.rows(); k += 2) {
-        slam_landmarks_file << unicycle_pose_estimate.segment(k, 2).transpose() << std::endl;
+    for (int k = 3; k < unicycle_pose_estimate.rows(); k += 3) {
+        slam_landmarks_file << unicycle_pose_estimate.segment(k, 3).transpose() << std::endl;
     }
 
     return 0;

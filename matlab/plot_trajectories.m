@@ -28,7 +28,7 @@ slam_landmarks_file = fopen('../bin/slam_landmarks.dat', 'r');
 slam_landmarks = [];
 
 while ~feof(slam_landmarks_file)
-    A = fscanf(slam_landmarks_file, '%f%f', [1 2]);
+    A = fscanf(slam_landmarks_file, '%f%f', [1 3]);
     slam_landmarks = [slam_landmarks; A];
 end
 

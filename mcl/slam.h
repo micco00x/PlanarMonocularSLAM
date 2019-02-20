@@ -52,9 +52,12 @@ namespace mcl {
             estimated_rotation_robot2world << std::cos(estimated_state[2]), -std::sin(estimated_state[2]),
                                               std::sin(estimated_state[2]),  std::cos(estimated_state[2]);
             Eigen::Matrix2f estimated_rotation_world2robot = estimated_rotation_robot2world.transpose();
-            Eigen::Matrix2f estimated_derivative_transpose_rotation_world2robot;
-            estimated_derivative_transpose_rotation_world2robot << -std::sin(estimated_state[2]),  std::cos(estimated_state[2]),
-                                                                   -std::cos(estimated_state[2]), -std::sin(estimated_state[2]);
+            Eigen::Matrix3f estimated_rotation_world2robot_3f = Eigen::Matrix3f::Identity();
+            estimated_rotation_world2robot_3f.block<2, 2>(0, 0) = estimated_rotation_world2robot;
+            Eigen::Matrix3f estimated_derivative_transpose_rotation_world2robot;
+            estimated_derivative_transpose_rotation_world2robot << -std::sin(estimated_state[2]),  std::cos(estimated_state[2]), 0.0f,
+                                                                   -std::cos(estimated_state[2]), -std::sin(estimated_state[2]), 0.0f,
+                                                                                            0.0f,                          0.0f, 0.0f;
 
             // GT transform:
             Eigen::Matrix4f gt_transform_robot2world;
@@ -63,6 +66,8 @@ namespace mcl {
                                                          0.0f,                  0.0f, 1.0f,       0.0f,
                                                          0.0f,                  0.0f, 0.0f,       1.0f;
             Eigen::Matrix4f gt_transform_world2camera = (gt_transform_robot2world * camera.transform_rf_parent).inverse();
+
+            const Eigen::Matrix3f rotation_robot2camera = camera.transform_rf_parent.block<3, 3>(0, 0).transpose();
 
             int tot_measurements_known_landmarks = 0;
 
@@ -84,9 +89,9 @@ namespace mcl {
             }
             const int number_of_unknown_landmarks = id_unknown_landmarks.size();
 
-            Eigen::VectorXf gt_bearings(tot_measurements_known_landmarks);
-            Eigen::VectorXf estimated_bearings(tot_measurements_known_landmarks);
-            Eigen::MatrixXf jacobian_measurements = Eigen::MatrixXf::Zero(tot_measurements_known_landmarks, estimated_state.rows());
+            Eigen::VectorXf measured_uv(2 * tot_measurements_known_landmarks);
+            Eigen::VectorXf estimated_uv(2 * tot_measurements_known_landmarks);
+            Eigen::MatrixXf jacobian_measurements = Eigen::MatrixXf::Zero(2 * tot_measurements_known_landmarks, estimated_state.rows());
 
             int k = 0;
             for (const auto& meas : measurements) {
@@ -107,36 +112,51 @@ namespace mcl {
                 auto state_map_it = id_to_state_map.find(meas.gt_landmark_id);
                 if (state_map_it != id_to_state_map.end()) {
                     // Compute bearing from estimate:
-                    Eigen::Vector2f estimated_landmark_position = estimated_state.segment(3 + 2 * state_map_it->second, 2);
-                    Eigen::Vector2f estimated_landmark_position_rf_robot = estimated_rotation_world2robot * (estimated_landmark_position - estimated_state.head(2));
-                    float estimated_bearing = std::atan2(estimated_landmark_position_rf_robot.y(), estimated_landmark_position_rf_robot.x());
-                    estimated_bearings[k] = estimated_bearing;
+                    Eigen::Vector3f estimated_landmark_position = estimated_state.segment(3 + 3 * state_map_it->second, 3);
+                    //std::cout << "*** KNOWN LANDMARK FOUND ***" << std::endl;
+                    //std::cout << "\t> estimated_landmark_position: " << estimated_landmark_position.transpose() << std::endl;
+                    //std::cout << "\t> landmarks[meas.gt_landmark_id].position: " << landmarks[meas.gt_landmark_id].position.transpose() << std::endl;
+                    Eigen::Vector3f estimated_landmark_position_rf_robot = estimated_rotation_world2robot_3f *
+                        (estimated_landmark_position - Eigen::Vector3f(estimated_state[0], estimated_state[1], 0.0f));
+                    Eigen::Vector3f estimated_landmark_position_rf_camera = (camera.transform_rf_parent.inverse() *
+                                                                            Eigen::Vector4f(estimated_landmark_position_rf_robot.x(),
+                                                                                            estimated_landmark_position_rf_robot.y(),
+                                                                                            estimated_landmark_position_rf_robot.z(),
+                                                                                            1.0f)).head(3);
+                    Eigen::Vector3f Kpcam = camera.matrix * estimated_landmark_position_rf_camera;
+                    estimated_uv(2 * k)     = Kpcam.x() / Kpcam.z();
+                    estimated_uv(2 * k + 1) = Kpcam.y() / Kpcam.z();
 
                     // Compute bearing from measurement (using simulated depth sensor):
-                    float gt_bearing = std::atan2(gt_landmark_position_rf_robot.y(), gt_landmark_position_rf_robot.x());
-                    gt_bearings[k] = gt_bearing;
+                    measured_uv(2 * k)     = meas.u;
+                    measured_uv(2 * k + 1) = meas.v;
 
-                    // Compute partial derivative of the landmark (rf_robot) wrt the robot:
-                    Eigen::Matrix<float, 2, 3> derivative_landmark_wrt_robot_rf_robot;
-                    derivative_landmark_wrt_robot_rf_robot.block<2, 2>(0, 0) = -estimated_rotation_world2robot;
-                    derivative_landmark_wrt_robot_rf_robot.block<2, 1>(0, 2) = estimated_derivative_transpose_rotation_world2robot * (estimated_landmark_position - estimated_state.head(2));
+                    //std::cout << "estimated_uv: " << estimated_uv(2 * k) << ", " << estimated_uv(2 * k + 1)
+                    //    << " - measured_uv: "<< measured_uv(2 * k) << ", " << measured_uv(2 * k + 1) << std::endl;
 
-                    // Compute partial derivative of atan wrt landmark (rf_robot):
-                    Eigen::Matrix<float, 1, 2> derivative_atan_wrt_landmark = 1.0f / estimated_landmark_position_rf_robot.squaredNorm() *
-                        Eigen::Vector2f(-estimated_landmark_position_rf_robot.y(), estimated_landmark_position_rf_robot.x()).transpose();
+                    // Compute partial derivative of the landmark express in
+                    // RF robot wrt robot (in rf world):
+                    Eigen::Matrix<float, 3, 3> derivative_landmark_wrt_robot_rf_robot;
+                    derivative_landmark_wrt_robot_rf_robot.block<3, 2>(0, 0) = -estimated_rotation_world2robot_3f.block<3, 2>(0, 0);
+                    derivative_landmark_wrt_robot_rf_robot.block<3, 1>(0, 2) = estimated_derivative_transpose_rotation_world2robot * (estimated_landmark_position - Eigen::Vector3f(estimated_state[0], estimated_state[1], 0.0f));
 
-                    // Compute partial derivative of atan wrt state (both robot and landmark):
-                    jacobian_measurements.block<1, 3>(k, 0) = derivative_atan_wrt_landmark * derivative_landmark_wrt_robot_rf_robot;
-                    jacobian_measurements.block<1, 2>(k, 3 + 2 * state_map_it->second) = derivative_atan_wrt_landmark * estimated_rotation_world2robot;
+                    // Compute partial derivative of proj wrt p=KR^T(x_t - t_t), K camera matrix:
+                    Eigen::Matrix<float, 2, 3> derivative_proj_wrt_Kpcam;
+                    derivative_proj_wrt_Kpcam << 1.0f / Kpcam.z(), 0.0f, -Kpcam.x() / std::pow(Kpcam.z(), 2.0f),
+                                                 0.0f, 1.0f / Kpcam.z(), -Kpcam.y() / std::pow(Kpcam.z(), 2.0f);
+
+                    // Compute partial derivative of proj wrt state (both robot and landmark):
+                    jacobian_measurements.block<2, 3>(2 * k, 0) = derivative_proj_wrt_Kpcam * camera.matrix * rotation_robot2camera * derivative_landmark_wrt_robot_rf_robot;
+                    jacobian_measurements.block<2, 3>(2 * k, 3 + 3 * state_map_it->second) = derivative_proj_wrt_Kpcam * camera.matrix * rotation_robot2camera * estimated_rotation_world2robot_3f;
                     ++k;
                 }
             }
 
             if (tot_measurements_known_landmarks > 0) {
-                const float measurement_noise = 0.01f;
-                const Eigen::MatrixXf covariance_measurements = measurement_noise * Eigen::MatrixXf::Identity(tot_measurements_known_landmarks, tot_measurements_known_landmarks);
+                const float measurement_noise = 12.0f;
+                const Eigen::MatrixXf covariance_measurements = measurement_noise * Eigen::MatrixXf::Identity(2 * tot_measurements_known_landmarks, 2 * tot_measurements_known_landmarks);
                 Eigen::MatrixXf kalman_gain_matrix = covariance_estimate * jacobian_measurements.transpose() * (jacobian_measurements * covariance_estimate * jacobian_measurements.transpose() + covariance_measurements).inverse();
-                estimated_state.noalias() += kalman_gain_matrix * (gt_bearings - estimated_bearings);
+                estimated_state.noalias() += kalman_gain_matrix * (measured_uv - estimated_uv);
                 covariance_estimate = (Eigen::MatrixXf::Identity(estimated_state.rows(), estimated_state.rows()) - kalman_gain_matrix * jacobian_measurements) * covariance_estimate;
             }
 
@@ -148,16 +168,16 @@ namespace mcl {
 
             // Update estimate_state and covariance_estimate if new landmarks
             // have been seen:
-            const float initial_landmark_noise = 2.0f;
-            estimated_state.conservativeResize(estimated_state.rows() + 2 * number_of_unknown_landmarks);
-            covariance_estimate.conservativeResize(covariance_estimate.rows() + 2 * number_of_unknown_landmarks,
-                                       covariance_estimate.cols() + 2 * number_of_unknown_landmarks);
-            covariance_estimate.rightCols(2 * number_of_unknown_landmarks).setZero();
-            covariance_estimate.bottomRows(2 * number_of_unknown_landmarks).setZero();
-            covariance_estimate.block(covariance_estimate.rows() - 2 * number_of_unknown_landmarks,
-                                      covariance_estimate.cols() - 2 * number_of_unknown_landmarks,
-                                      2 * number_of_unknown_landmarks,
-                                      2 * number_of_unknown_landmarks) = initial_landmark_noise * Eigen::MatrixXf::Identity(2 * number_of_unknown_landmarks, 2 * number_of_unknown_landmarks);
+            const float initial_landmark_noise = 0.2f;
+            estimated_state.conservativeResize(estimated_state.rows() + 3 * number_of_unknown_landmarks);
+            covariance_estimate.conservativeResize(covariance_estimate.rows() + 3 * number_of_unknown_landmarks,
+                                       covariance_estimate.cols() + 3 * number_of_unknown_landmarks);
+            covariance_estimate.rightCols(3 * number_of_unknown_landmarks).setZero();
+            covariance_estimate.bottomRows(3 * number_of_unknown_landmarks).setZero();
+            covariance_estimate.block(covariance_estimate.rows() - 3 * number_of_unknown_landmarks,
+                                      covariance_estimate.cols() - 3 * number_of_unknown_landmarks,
+                                      3 * number_of_unknown_landmarks,
+                                      3 * number_of_unknown_landmarks) = initial_landmark_noise * Eigen::MatrixXf::Identity(3 * number_of_unknown_landmarks, 3 * number_of_unknown_landmarks);
             k = 0;
             for (const auto& meas : measurements) {
                 int meas_idx = &meas - &measurements[0];
@@ -168,9 +188,11 @@ namespace mcl {
                     state_to_id_map.push_back(meas.gt_landmark_id);
 
                     // Update estimated_state (covariance updated above):
-                    Eigen::Vector2f landmark_initial_position = (estimated_transform_robot2world * gt_landmark_position_rf_robot_vector[meas_idx]).head(2);
-                    //std::cout << "Adding landmark id=" << meas.gt_landmark_id << " with initial diff " << (landmarks[meas.gt_landmark_id].position.head(2) - landmark_initial_position).transpose() << std::endl;
-                    estimated_state.segment(estimated_state.rows()-2*(number_of_unknown_landmarks-k), 2) = landmark_initial_position;
+                    Eigen::Vector3f landmark_initial_position = (estimated_transform_robot2world * gt_landmark_position_rf_robot_vector[meas_idx]).head(3);
+                    std::cout << "Adding landmark id=" << meas.gt_landmark_id << " with initial diff " << (landmarks[meas.gt_landmark_id].position - landmark_initial_position).transpose() << std::endl;
+                    std::cout << "\t>gt: " << landmarks[meas.gt_landmark_id].position.transpose() << std::endl;
+                    std::cout << "\t>init: " << landmark_initial_position.transpose() << std::endl;
+                    estimated_state.segment(estimated_state.rows()-3*(number_of_unknown_landmarks-k), 3) = landmark_initial_position;
                     ++k;
                 }
             }
