@@ -62,14 +62,18 @@ int main() {
         odom_trajectory.push_back(odom_pose);
         std::vector<mcl::Measurement> v_meas;
         while (getline(measurement_file, info_string)) {
-            mcl::Measurement meas;
-            std::istringstream ss(info_string);
-            ss >> dummy_string >> meas;
-            v_meas.push_back(meas);
+            // Actually check that the string read is a point:
+            if (info_string.find("point") == 0) {
+                mcl::Measurement meas;
+                std::istringstream iss(info_string);
+                iss >> dummy_string >> meas;
+                v_meas.push_back(meas);
+            }
         }
         measurements.push_back(v_meas);
     }
 
+/*
     // SLAM:
     std::ofstream slam_file("bin/slam_trajectory.dat");
     std::map<int, int> id_to_state_map;
@@ -99,6 +103,68 @@ int main() {
     for (int k = 3; k < unicycle_pose_estimate.rows(); k += 3) {
         slam_landmarks_file << unicycle_pose_estimate.segment(k, 3).transpose() << std::endl;
     }
+*/
+
+    // Reading estimated trajectory (previously done with EKF-SLAM):
+    /*std::vector<Eigen::Vector3f> estimated_trajectory;
+    estimated_trajectory.push_back(odom_trajectory[0]);
+    std::ifstream estimated_trajectory_file("bin/slam_trajectory-end.dat");
+    while (getline(estimated_trajectory_file, info_string)) {
+        Eigen::Vector3f pose;
+        std::istringstream ss(info_string);
+        ss >> pose[0] >> pose[1] >> pose[2];
+        estimated_trajectory.push_back(pose);
+    }*/
+
+    std::vector<Eigen::Vector3f> odometry_displacement;
+    for (int k = 1; k < NUM_MEASUREMENTS; ++k) {
+        odometry_displacement.push_back(odom_trajectory[k] - odom_trajectory[k-1]);
+    }
+
+    // TODO: algorithm to initialize the landmarks (reading from world.dat now)
+    std::vector<Eigen::Vector3f> estimated_landmarks;
+    for (const auto& landmark : landmarks) {
+        estimated_landmarks.push_back(landmark.position);
+    }
+
+    // Put all measurements in a vector of measurements and build a
+    // proj_association between poses idx and landmark id:
+    std::vector<mcl::Measurement> full_measurements;
+    std::vector<std::pair<int, int>> proj_pose_landmark_association;
+    int c_it_idx = 0;
+    for (const auto& c_it : measurements) {
+        for (const auto& c_meas_it : c_it) {
+            full_measurements.push_back(c_meas_it);
+            proj_pose_landmark_association.push_back(std::make_pair(c_it_idx, c_meas_it.gt_landmark_id));
+        }
+        ++c_it_idx;
+    }
+
+    int num_iterations = 10;
+    float damping = 0.0f;
+    //float kernel_threshold = 0.001f;
+    float kernel_threshold = 20000.0f; // sqrt(1000)=31.62[px], sqrt(10000)=100.00[px], sqrt(20000)=141.42[px]
+    std::cout << "*** Least Squares ***" << std::endl;
+    mcl::slam::least_squares(odom_trajectory,
+                             estimated_landmarks,
+                             full_measurements, // landmark measurements
+                             proj_pose_landmark_association,    // landmark data association
+                             //odometry_displacement,
+                             landmarks,
+                             camera,
+                             num_iterations,
+                             damping,
+                             kernel_threshold);
+
+     std::ofstream ls_slam_file("bin/ls_slam_trajectory.dat");
+     for (const auto& pose : odom_trajectory) {
+         ls_slam_file << pose.transpose() << std::endl;
+     }
+
+     std::ofstream ls_slam_landmarks_file("bin/ls_slam_landmarks.dat");
+     for (const auto& landmark : estimated_landmarks) {
+         ls_slam_landmarks_file << landmark.transpose() << std::endl;
+     }
 
     return 0;
 }

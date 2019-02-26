@@ -13,7 +13,7 @@ end
 fclose(dataset_trajectories_file);
 
 % Reading trajectory from SLAM:
-slam_trajectory_file = fopen('../bin/slam_trajectory.dat', 'r');
+slam_trajectory_file = fopen('../bin/ls_slam_trajectory.dat', 'r');
 slam_trajectory = [];
 
 while ~feof(slam_trajectory_file)
@@ -24,12 +24,14 @@ end
 fclose(slam_trajectory_file);
 
 % Reading landmarks from SLAM:
-slam_landmarks_file = fopen('../bin/slam_landmarks.dat', 'r');
+slam_landmarks_file = fopen('../bin/ls_slam_landmarks.dat', 'r');
 slam_landmarks = [];
 
 while ~feof(slam_landmarks_file)
-    A = fscanf(slam_landmarks_file, '%f%f', [1 3]);
-    slam_landmarks = [slam_landmarks; A];
+    A = fscanf(slam_landmarks_file, '%f%f%f', [1 3]);
+    if size(A, 1) ~= 0
+        slam_landmarks = [slam_landmarks; [A(1), A(2)]];
+    end
 end
 
 fclose(slam_landmarks_file);
