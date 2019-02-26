@@ -140,9 +140,8 @@ int main() {
         ++c_it_idx;
     }
 
-    int num_iterations = 10;
+    int num_iterations = 15;
     float damping = 0.0f;
-    //float kernel_threshold = 0.001f;
     float kernel_threshold = 20000.0f; // sqrt(1000)=31.62[px], sqrt(10000)=100.00[px], sqrt(20000)=141.42[px]
     std::cout << "*** Least Squares ***" << std::endl;
     mcl::slam::least_squares(odom_trajectory,
