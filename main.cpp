@@ -122,9 +122,72 @@ int main() {
     }
 
     // TODO: algorithm to initialize the landmarks (reading from world.dat now)
-    std::vector<Eigen::Vector3f> estimated_landmarks;
+    /*std::vector<Eigen::Vector3f> estimated_landmarks;
     for (const auto& landmark : landmarks) {
         estimated_landmarks.push_back(landmark.position);
+    }*/
+
+    // Vector containing all homogeneous camera projection matrices P:
+    std::vector<Eigen::Matrix<float, 3, 4>> homogeneous_camera_projection_matrices(odom_trajectory.size());
+    //for (const auto& odom_pose : odom_trajectory) {
+    for (int k = 0; k < odom_trajectory.size(); ++k) {
+        const auto& odom_pose = odom_trajectory[k];
+        Eigen::Matrix4f T_robot2world   = mcl::planar_v2t(odom_pose);
+        Eigen::Matrix4f T_camera2world  = T_robot2world * camera.transform_rf_parent;
+        Eigen::Matrix3f R_world2camera  = T_camera2world.block<3, 3>(0, 0).transpose();
+        Eigen::Vector3f camera_position = T_camera2world.block<3, 1>(0, 3);
+        Eigen::Matrix<float, 3, 4> hom_camera_proj_matrix; // P = KR[I|-C]
+        hom_camera_proj_matrix.block<3, 3>(0, 0).setIdentity();
+        hom_camera_proj_matrix.block<3, 1>(0, 3) = -camera_position;
+        hom_camera_proj_matrix = camera.matrix * R_world2camera * hom_camera_proj_matrix;
+        homogeneous_camera_projection_matrices[k] = hom_camera_proj_matrix;
+    }
+
+    // Vector containing DLT matrix for each landmark:
+    // NOTE: setting matrix A as explained in Zisserman p.312 and in
+    // https://www.uio.no/studier/emner/matnat/its/UNIK4690/v16/forelesninger/lecture_7_2-triangulation.pdf.
+    // NOTE: using landmarks.size(), let's say we already know the number of landmarks:
+    std::vector<Eigen::Matrix<float, Eigen::Dynamic, 4>> dlt_matrices(landmarks.size());
+    //for (const auto& c_it : measurements) {
+    for (int k = 0; k < measurements.size(); ++k) {
+        const auto& meas_v = measurements[k];
+        const Eigen::Matrix<float, 1, 4> p_row1 = homogeneous_camera_projection_matrices[k].block<1, 4>(0, 0);
+        const Eigen::Matrix<float, 1, 4> p_row2 = homogeneous_camera_projection_matrices[k].block<1, 4>(1, 0);
+        const Eigen::Matrix<float, 1, 4> p_row3 = homogeneous_camera_projection_matrices[k].block<1, 4>(2, 0);
+        for (const auto& meas : meas_v) {
+            int curr_n_rows = dlt_matrices[meas.gt_landmark_id].rows();
+            dlt_matrices[meas.gt_landmark_id].conservativeResize(curr_n_rows + 2, Eigen::NoChange);
+            dlt_matrices[meas.gt_landmark_id].row(curr_n_rows  ) = meas.v * p_row3 - p_row2;
+            dlt_matrices[meas.gt_landmark_id].row(curr_n_rows+1) = meas.u * p_row3 - p_row1;
+        }
+    }
+
+    // Determining initial guess of the landmarks:
+    // NOTE: using algorithm A5.4 p.593 (Zisserman).
+    std::vector<Eigen::Vector3f> dlt_landmarks;
+    std::set<int> discarded_landmark_ids;
+    for (int k = 0; k < dlt_matrices.size(); ++k) {
+        const auto& dlt_A = dlt_matrices[k];
+        if (dlt_A.rows() >= 4) {
+            Eigen::JacobiSVD<Eigen::MatrixXf> svd(dlt_A, Eigen::ComputeThinU | Eigen::ComputeThinV);
+            Eigen::Vector4f landmark_pos_init_estimate_hom = svd.matrixV().rightCols(1).col(0);
+            //Eigen::Vector3f landmark_pos_init_estimate = landmark_pos_init_estimate_hom.head<3>() / landmark_pos_init_estimate_hom[3];
+            Eigen::Vector3f landmark_pos_init_estimate = mcl::to_inhomogeneous(landmark_pos_init_estimate_hom);
+            std::cout << "Landmark " << k << ". gt: " << landmarks[k].position.transpose()
+                << " - estimate: " << landmark_pos_init_estimate.transpose()
+                << " - error: " << (landmarks[k].position - landmark_pos_init_estimate).transpose()
+                << std::endl;
+            dlt_landmarks.push_back(landmark_pos_init_estimate);
+        } else {
+            std::cout << "CANNOT DETERMINE LANDMARK id=" << k << std::endl;
+            dlt_landmarks.push_back(landmarks[k].position);
+            discarded_landmark_ids.insert(k);
+        }
+    }
+
+    std::ofstream ls_slam_landmarks_dlt_init_file("bin/ls_slam_landmarks_dlt_init.dat");
+    for (const auto& landmark : dlt_landmarks) {
+        ls_slam_landmarks_dlt_init_file << landmark.transpose() << std::endl;
     }
 
     // Put all measurements in a vector of measurements and build a
@@ -134,8 +197,11 @@ int main() {
     int c_it_idx = 0;
     for (const auto& c_it : measurements) {
         for (const auto& c_meas_it : c_it) {
-            full_measurements.push_back(c_meas_it);
-            proj_pose_landmark_association.push_back(std::make_pair(c_it_idx, c_meas_it.gt_landmark_id));
+            // Add measurement only if the landmark has not been discarded:
+            if (discarded_landmark_ids.find(c_meas_it.gt_landmark_id) == discarded_landmark_ids.end()) {
+                full_measurements.push_back(c_meas_it);
+                proj_pose_landmark_association.push_back(std::make_pair(c_it_idx, c_meas_it.gt_landmark_id));
+            }
         }
         ++c_it_idx;
     }
@@ -145,11 +211,11 @@ int main() {
     float kernel_threshold = 20000.0f; // sqrt(1000)=31.62[px], sqrt(10000)=100.00[px], sqrt(20000)=141.42[px]
     std::cout << "*** Least Squares ***" << std::endl;
     mcl::slam::least_squares(odom_trajectory,
-                             estimated_landmarks,
+                             dlt_landmarks,
                              full_measurements, // landmark measurements
                              proj_pose_landmark_association,    // landmark data association
                              //odometry_displacement,
-                             landmarks,
+                             //landmarks,
                              camera,
                              num_iterations,
                              damping,
@@ -161,7 +227,7 @@ int main() {
      }
 
      std::ofstream ls_slam_landmarks_file("bin/ls_slam_landmarks.dat");
-     for (const auto& landmark : estimated_landmarks) {
+     for (const auto& landmark : dlt_landmarks) {
          ls_slam_landmarks_file << landmark.transpose() << std::endl;
      }
 

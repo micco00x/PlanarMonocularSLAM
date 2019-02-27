@@ -226,7 +226,7 @@ namespace mcl {
                            const std::vector<mcl::Measurement>& full_measurements,
                            const std::vector<std::pair<int, int>>& proj_pose_landmark_association,
                            //const std::vector<Eigen::Vector3f>& odometry_displacement,
-                           const std::vector<mcl::Landmark>& landmarks,
+                           //const std::vector<mcl::Landmark>& landmarks,
                            const mcl::Camera& camera,
                            const int num_iterations,
                            const float damping,
@@ -259,12 +259,11 @@ namespace mcl {
                     int pose_idx    = proj_pose_landmark_association[meas_idx].first;
                     int landmark_id = proj_pose_landmark_association[meas_idx].second;
                     const Eigen::Vector3f& curr_pose = estimated_trajectory[pose_idx];
-                    Eigen::Vector4f curr_landmark;
-                    curr_landmark.head<3>() = landmarks[landmark_id].position;
-                    curr_landmark[3] = 1.0f; // homogeneous coords.
-                    Eigen::Matrix4f T_robot2world = Eigen::Matrix4f::Identity();
-                    T_robot2world.block<3, 3>(0, 0) = mcl::Rz(curr_pose[2]);
-                    T_robot2world.block<2, 1>(0, 3) = curr_pose.head<2>();
+                    //Eigen::Vector4f curr_landmark;
+                    //curr_landmark.head<3>() = estimated_landmarks[landmark_id];//landmarks[landmark_id].position;
+                    //curr_landmark[3] = 1.0f; // homogeneous coords.
+                    Eigen::Vector4f curr_landmark = mcl::to_homogeneous(estimated_landmarks[landmark_id]);
+                    Eigen::Matrix4f T_robot2world = mcl::planar_v2t(curr_pose);
                     const Eigen::Matrix4f T_world2camera = (T_robot2world * camera.transform_rf_parent).inverse();
 
                     // Position of the landmark in rf camera:
