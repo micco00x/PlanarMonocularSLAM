@@ -259,9 +259,6 @@ namespace mcl {
                     int pose_idx    = proj_pose_landmark_association[meas_idx].first;
                     int landmark_id = proj_pose_landmark_association[meas_idx].second;
                     const Eigen::Vector3f& curr_pose = estimated_trajectory[pose_idx];
-                    //Eigen::Vector4f curr_landmark;
-                    //curr_landmark.head<3>() = estimated_landmarks[landmark_id];//landmarks[landmark_id].position;
-                    //curr_landmark[3] = 1.0f; // homogeneous coords.
                     Eigen::Vector4f curr_landmark = mcl::to_homogeneous(estimated_landmarks[landmark_id]);
                     Eigen::Matrix4f T_robot2world = mcl::planar_v2t(curr_pose);
                     const Eigen::Matrix4f T_world2camera = (T_robot2world * camera.transform_rf_parent).inverse();

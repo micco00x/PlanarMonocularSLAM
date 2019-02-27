@@ -165,22 +165,22 @@ int main() {
     // Determining initial guess of the landmarks:
     // NOTE: using algorithm A5.4 p.593 (Zisserman).
     std::vector<Eigen::Vector3f> dlt_landmarks;
+    std::map<int, int> dlt_landmarks_id_to_idx; // helper map to give correct position of dlt_landmarks
     std::set<int> discarded_landmark_ids;
     for (int k = 0; k < dlt_matrices.size(); ++k) {
         const auto& dlt_A = dlt_matrices[k];
         if (dlt_A.rows() >= 4) {
             Eigen::JacobiSVD<Eigen::MatrixXf> svd(dlt_A, Eigen::ComputeThinU | Eigen::ComputeThinV);
             Eigen::Vector4f landmark_pos_init_estimate_hom = svd.matrixV().rightCols(1).col(0);
-            //Eigen::Vector3f landmark_pos_init_estimate = landmark_pos_init_estimate_hom.head<3>() / landmark_pos_init_estimate_hom[3];
             Eigen::Vector3f landmark_pos_init_estimate = mcl::to_inhomogeneous(landmark_pos_init_estimate_hom);
             std::cout << "Landmark " << k << ". gt: " << landmarks[k].position.transpose()
                 << " - estimate: " << landmark_pos_init_estimate.transpose()
                 << " - error: " << (landmarks[k].position - landmark_pos_init_estimate).transpose()
                 << std::endl;
+            dlt_landmarks_id_to_idx[k] = dlt_landmarks.size();
             dlt_landmarks.push_back(landmark_pos_init_estimate);
         } else {
             std::cout << "CANNOT DETERMINE LANDMARK id=" << k << std::endl;
-            dlt_landmarks.push_back(landmarks[k].position);
             discarded_landmark_ids.insert(k);
         }
     }
@@ -200,7 +200,7 @@ int main() {
             // Add measurement only if the landmark has not been discarded:
             if (discarded_landmark_ids.find(c_meas_it.gt_landmark_id) == discarded_landmark_ids.end()) {
                 full_measurements.push_back(c_meas_it);
-                proj_pose_landmark_association.push_back(std::make_pair(c_it_idx, c_meas_it.gt_landmark_id));
+                proj_pose_landmark_association.push_back(std::make_pair(c_it_idx, dlt_landmarks_id_to_idx[c_meas_it.gt_landmark_id]));
             }
         }
         ++c_it_idx;
