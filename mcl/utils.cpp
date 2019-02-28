@@ -17,6 +17,17 @@ namespace mcl {
         return S;
     }
 
+    Eigen::Vector3f vector_from_skew(const Eigen::Matrix3f& S) {
+        return Eigen::Vector3f(S(2, 1), S(0, 2), S(1, 0));
+    }
+
+    Eigen::Matrix4f T_from_Rt(const Eigen::Matrix3f& R, const Eigen::Vector3f& t) {
+        Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
+        T.block<3, 3>(0, 0) = R;
+        T.block<3, 1>(0, 3) = t;
+        return T;
+    }
+
     // pose = (x, y, theta):
     Eigen::Matrix3f v2t(const Eigen::Vector3f& pose) {
         Eigen::Matrix3f T = mcl::Rz(pose[2]);
@@ -48,6 +59,18 @@ namespace mcl {
     Eigen::Matrix4f Rz_4f(float angle) {
         Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
         T.block<3, 3>(0, 0) = mcl::Rz(angle);
+        return T;
+    }
+
+    Eigen::Matrix4f Ry_4f(float angle) {
+        Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
+        T.block<3, 3>(0, 0) = mcl::Ry(angle);
+        return T;
+    }
+
+    Eigen::Matrix4f Rx_4f(float angle) {
+        Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
+        T.block<3, 3>(0, 0) = mcl::Rx(angle);
         return T;
     }
 

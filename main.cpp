@@ -206,6 +206,129 @@ int main() {
         ++c_it_idx;
     }
 
+    // Pose-pose relation doing 8-point algorithm:
+    // TODO: as explained in https://en.wikipedia.org/wiki/Essential_matrix#Determining_R_and_t_from_E
+    //       there could be 4 different solutions, only one of these is feasible, you must generate
+    //       all of them and choose the best one. You will have a problem of scaling anyway so
+    //       you must deal with that (didn't handled here).
+/*
+    for (int idxi_meas = 0; idxi_meas < measurements.size(); ++idxi_meas) {
+        const auto& meas_vi = measurements[idxi_meas];
+        for (int idxj_meas = idxi_meas + 1; idxj_meas < measurements.size(); ++idxj_meas) {
+            const auto& meas_vj = measurements[idxj_meas];
+            // Check that there are at least 8 correspondences between the two
+            // images and then solve the minimization problem as explained in
+            // https://en.wikipedia.org/wiki/Eight-point_algorithm:
+            Eigen::Matrix<float, 9, Eigen::Dynamic> Y;
+            int idxi_land = 0;
+            int idxj_land = 0;
+            int num_correspondences = 0;
+            while (idxi_land < meas_vi.size() &&
+                   idxj_land < meas_vj.size()) {
+                const mcl::Measurement& meas1 = meas_vi[idxi_land];
+                const mcl::Measurement& meas2 = meas_vj[idxj_land];
+                const int landmark_id_i = meas1.gt_landmark_id;
+                const int landmark_id_j = meas2.gt_landmark_id;
+                if (landmark_id_i == landmark_id_j) {
+                    // Correspondence found, add it to Y:
+                    Eigen::Matrix<float, 9, 1> y_elem;
+                    y_elem << meas2.u * meas1.u,
+                              meas2.u * meas1.v,
+                              meas2.u          ,
+                              meas2.v * meas1.u,
+                              meas2.v * meas1.v,
+                              meas2.v          ,
+                                        meas1.u,
+                                        meas1.v,
+                                           1.0f;
+                    Y.conservativeResize(Eigen::NoChange, Y.cols()+1);
+                    Y.col(num_correspondences) = y_elem;
+                    ++num_correspondences;
+                    ++idxi_land;
+                    ++idxj_land;
+                } else if (landmark_id_i < landmark_id_j) {
+                    // No correspondence found, idx of first vector is less
+                    // than second one, so you can increas idx of first to
+                    // find match, more efficient than checking everything.
+                    ++idxi_land;
+                } else {
+                    // Same as before but for the second vector.
+                    ++idxj_land;
+                }
+            }
+
+            // If there are at least 8 correspondences the 8-point algorithm can be used:
+            if (num_correspondences >= 8) {
+                std::cout << num_correspondences << " CORRESPONDENCES FOUND: " << idxi_meas << " " << idxj_meas << std::endl;
+                Eigen::JacobiSVD<Eigen::MatrixXf> Y_svd(Y, Eigen::ComputeThinU | Eigen::ComputeThinV);
+                //std::cout << "Y_svd.matrixU():\n" << Y_svd.matrixU() << std::endl;
+                Eigen::Matrix<float, 9, 1> e_v = Y_svd.matrixU().rightCols(1).col(0);
+                Eigen::Matrix3f E_est;
+                E_est << e_v[0], e_v[1], e_v[2],
+                         e_v[3], e_v[4], e_v[5],
+                         e_v[6], e_v[7], e_v[8];
+                // Enforce internal constraint (solve min_{E'}(||E'-E_{est}||_F)
+                // as explain in 8-point algorithm step 3):
+                std::cout << "\t> enforcing internal constraint" << std::endl;
+                Eigen::JacobiSVD<Eigen::MatrixXf> E_est_svd(E_est, Eigen::ComputeThinU | Eigen::ComputeThinV);
+                Eigen::Vector3f singular_values = E_est_svd.singularValues();
+                singular_values[2] = 0.0f;
+                Eigen::Matrix3f essential_matrix = E_est_svd.matrixU() *
+                                                   singular_values.asDiagonal() *
+                                                   E_est_svd.matrixV().transpose();
+                std::cout << "Checking essential matrix is OK:" << std::endl;
+                for (const auto& m1 : meas_vi) {
+                    for (const auto& m2 : meas_vj) {
+                        if (m1.gt_landmark_id == m2.gt_landmark_id) {
+                            std::cout << "\tid " << m1.gt_landmark_id << ": "
+                                << Eigen::Vector3f(m2.u, m2.v, 1.0f).transpose() *
+                                   essential_matrix *
+                                   Eigen::Vector3f(m1.u, m1.v, 1.0f)
+                                << std::endl;
+                        }
+                    }
+                }
+                // Build R and t from essential matrix as explained in
+                // https://en.wikipedia.org/wiki/Essential_matrix#Determining_R_and_t_from_E:
+                std::cout << "\t> building R, t" << std::endl;
+                Eigen::JacobiSVD<Eigen::MatrixXf> E_svd(essential_matrix, Eigen::ComputeThinU | Eigen::ComputeThinV);
+                std::cout << "E_svd singular values: " << E_svd.singularValues().transpose() << std::endl;
+                // Discard relation if first and second singular values are too
+                // far away (they should be: s, s, 0).
+                if (E_svd.singularValues()[0] - E_svd.singularValues()[1] >= 0.01f) {
+                    std::cout << "SINGULAR VALUES TOO FAR AWAY." << std::endl;
+                    continue;
+                }
+                Eigen::Matrix3f W;
+                W << 0.0f, -1.0f, 0.0f,
+                     1.0f,  0.0f, 0.0f,
+                     0.0f,  0.0f, 1.0f;
+                W.transposeInPlace();
+                Eigen::Matrix3f Z;
+                Z <<  0.0f, 1.0f, 0.0f,
+                     -1.0f, 0.0f, 0.0f,
+                      0.0f, 0.0f, 0.0f;
+                Eigen::Matrix3f skew_t = E_svd.matrixU() * W * E_svd.singularValues().asDiagonal() * E_svd.matrixU().transpose();
+                //Eigen::Matrix3f skew_t = E_svd.matrixU() * Z * E_svd.matrixU().transpose();
+                // Note that here R and t are such that E = R*skew(t), the
+                // transform from the 1nd RF to the 2st it T=[R -Rt; 0 1],
+                // hence, from 2nd to 1st is T=[R^T t; 0 1].
+                Eigen::Vector3f t_camera2camera = mcl::vector_from_skew(skew_t);
+                Eigen::Matrix3f R_camera2camera = E_svd.matrixU() * W.transpose() * E_svd.matrixV().transpose();
+                std::cout << "skew_t:\n" << skew_t << std::endl;
+                std::cout << "E-R[t]_x:\n" << essential_matrix - R_camera2camera*skew_t << std::endl;
+                Eigen::Matrix4f T_camera2camera = mcl::T_from_Rt(R_camera2camera.transpose(), t_camera2camera);
+                std::cout << "T_camera2camera:\n" << T_camera2camera << std::endl;
+                Eigen::Matrix4f T_robot2robot = camera.transform_rf_parent * T_camera2camera *
+                    camera.transform_rf_parent.inverse();
+                Eigen::Matrix3f T_robot2robot_gt = mcl::v2t(gt_trajectory[idxi_meas]).inverse() * mcl::v2t(gt_trajectory[idxj_meas]);
+                std::cout << "T_robot2robot_gt:\n" << T_robot2robot_gt << std::endl;
+                std::cout << "T_robot2robot:\n" << T_robot2robot << std::endl;
+            }
+        }
+    }
+*/
+
     int num_iterations = 15;
     float damping = 0.0f;
     float kernel_threshold = 20000.0f; // sqrt(1000)=31.62[px], sqrt(10000)=100.00[px], sqrt(20000)=141.42[px]
