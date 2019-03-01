@@ -211,6 +211,8 @@ int main() {
     //       there could be 4 different solutions, only one of these is feasible, you must generate
     //       all of them and choose the best one. You will have a problem of scaling anyway so
     //       you must deal with that (didn't handled here).
+    // TODO: maybe better to do normalized 8-point algorithm to find F, then
+    //       determine E = K'^T*F*K (K'=K).
 /*
     for (int idxi_meas = 0; idxi_meas < measurements.size(); ++idxi_meas) {
         const auto& meas_vi = measurements[idxi_meas];
@@ -290,8 +292,16 @@ int main() {
                 }
                 // Build R and t from essential matrix as explained in
                 // https://en.wikipedia.org/wiki/Essential_matrix#Determining_R_and_t_from_E:
+                // TODO: you should actually check between the four possibilities
+                //       using W, W^T, t, -t that the resulting T is valid (there
+                //       is only one among the four).
                 std::cout << "\t> building R, t" << std::endl;
                 Eigen::JacobiSVD<Eigen::MatrixXf> E_svd(essential_matrix, Eigen::ComputeThinU | Eigen::ComputeThinV);
+                // Make sure U and V have positive determinant:
+                Eigen::MatrixXf U = E_svd.matrixU();
+                Eigen::MatrixXf V = E_svd.matrixV();
+                if (U.determinant() < 0.0f) U *= -1.0f;
+                if (V.determinant() < 0.0f) V *= -1.0f;
                 std::cout << "E_svd singular values: " << E_svd.singularValues().transpose() << std::endl;
                 // Discard relation if first and second singular values are too
                 // far away (they should be: s, s, 0).
@@ -308,13 +318,13 @@ int main() {
                 Z <<  0.0f, 1.0f, 0.0f,
                      -1.0f, 0.0f, 0.0f,
                       0.0f, 0.0f, 0.0f;
-                Eigen::Matrix3f skew_t = E_svd.matrixU() * W * E_svd.singularValues().asDiagonal() * E_svd.matrixU().transpose();
-                //Eigen::Matrix3f skew_t = E_svd.matrixU() * Z * E_svd.matrixU().transpose();
+                Eigen::Matrix3f skew_t = U * W * E_svd.singularValues().asDiagonal() * U.transpose();
+                //Eigen::Matrix3f skew_t = U * Z * U.transpose();
                 // Note that here R and t are such that E = R*skew(t), the
                 // transform from the 1nd RF to the 2st it T=[R -Rt; 0 1],
                 // hence, from 2nd to 1st is T=[R^T t; 0 1].
                 Eigen::Vector3f t_camera2camera = mcl::vector_from_skew(skew_t);
-                Eigen::Matrix3f R_camera2camera = E_svd.matrixU() * W.transpose() * E_svd.matrixV().transpose();
+                Eigen::Matrix3f R_camera2camera = U * W.transpose() * V.transpose();
                 std::cout << "skew_t:\n" << skew_t << std::endl;
                 std::cout << "E-R[t]_x:\n" << essential_matrix - R_camera2camera*skew_t << std::endl;
                 Eigen::Matrix4f T_camera2camera = mcl::T_from_Rt(R_camera2camera.transpose(), t_camera2camera);
