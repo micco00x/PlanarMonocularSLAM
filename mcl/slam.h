@@ -11,12 +11,10 @@
 
 namespace mcl {
 
-    Eigen::VectorXf _flatten(const Eigen::MatrixXf& M) {
+    Eigen::VectorXf _flatten_by_cols(const Eigen::MatrixXf& M) {
         Eigen::VectorXf flattened_M(M.rows() * M.cols());
-        for (int r = 0; r < M.rows(); ++r) {
-            for (int c = 0; c < M.cols(); ++c) {
-                flattened_M(r * M.cols() + c) = M(r, c);
-            }
+        for (int c = 0; c < M.cols(); ++c) {
+            flattened_M.segment(c * M.rows(), M.rows()) = M.col(c);
         }
         return flattened_M;
     }
@@ -357,9 +355,7 @@ namespace mcl {
                     const Eigen::Matrix3f Xr_j = mcl::v2t(estimated_trajectory[idx_odom_displ+1]);
                     const Eigen::Matrix3f Z_hat_ij = Xr_i.inverse() * Xr_j;
                     const Eigen::Matrix3f Z_ij = mcl::v2t(odom_displ);
-                    Eigen::VectorXf pose_error = mcl::_flatten(Z_hat_ij - Z_ij);
-                    float chi = pose_error.squaredNorm();
-                    chi_tot += chi;
+                    Eigen::VectorXf pose_error = mcl::_flatten_by_cols(Z_hat_ij - Z_ij);
 
                     // Computing partial derivative of v2t(-deltax_i) wrt deltax_i,
                     // same as v2t(deltax_i)^T wrt deltax_i for small deltax_i,
@@ -374,15 +370,15 @@ namespace mcl {
                                                       0.0f, 0.0f, -1.0f,
                                                       0.0f, 0.0f,  0.0f;
                     Eigen::Matrix3f derivative_v2tdeltaxT_wrt_dthetai;
-                    derivative_v2tdeltaxT_wrt_dthetai << 0.0f, -1.0f, 0.0f,
-                                                         1.0f,  0.0f, 0.0f,
-                                                         0.0f,  0.0f, 0.0f;
+                    derivative_v2tdeltaxT_wrt_dthetai <<  0.0f, 1.0f, 0.0f,
+                                                         -1.0f, 0.0f, 0.0f,
+                                                          0.0f, 0.0f, 0.0f;
 
                     // Computing partial derivative of h(X boxplus dx) wrt deltax_i
                     // and flatten it:
-                    Eigen::VectorXf flattened_derivative_h_wrt_dtxi = mcl::_flatten(Xr_i.inverse() * derivative_v2tdeltaxT_wrt_dtxi * Xr_j);
-                    Eigen::VectorXf flattened_derivative_h_wrt_dtyi = mcl::_flatten(Xr_i.inverse() * derivative_v2tdeltaxT_wrt_dtyi * Xr_j);
-                    Eigen::VectorXf flattened_derivative_h_wrt_dthetai = mcl::_flatten(Xr_i.inverse() * derivative_v2tdeltaxT_wrt_dthetai * Xr_j);
+                    Eigen::VectorXf flattened_derivative_h_wrt_dtxi = mcl::_flatten_by_cols(Xr_i.inverse() * derivative_v2tdeltaxT_wrt_dtxi * Xr_j);
+                    Eigen::VectorXf flattened_derivative_h_wrt_dtyi = mcl::_flatten_by_cols(Xr_i.inverse() * derivative_v2tdeltaxT_wrt_dtyi * Xr_j);
+                    Eigen::VectorXf flattened_derivative_h_wrt_dthetai = mcl::_flatten_by_cols(Xr_i.inverse() * derivative_v2tdeltaxT_wrt_dthetai * Xr_j);
 
                     // Chordal jacobian of h(X boxplus dx) wrt deltax_i:
                     Eigen::Matrix<float, 9, 3> flatten_Ji;
@@ -393,19 +389,42 @@ namespace mcl {
                     // Chordal jacobian of h(X boxplus dx) wrt deltax_j (deltax_i+1):
                     Eigen::Matrix<float, 9, 3> flatten_Jj = -flatten_Ji;
 
-                    int H_i_idx = pose_dim * idx_odom_displ;
-                    int H_j_idx = pose_dim * (idx_odom_displ+1);
+                    // Apply kernel threshold before defining Jacobians:
+                    Eigen::MatrixXf omega_pose = Eigen::MatrixXf::Identity(pose_error.rows(), pose_error.rows()); // should be 9x9 anyway
+                    float chi = pose_error.transpose() * omega_pose * pose_error;
+                    std::cout << "chi(" << idx_odom_displ << ", "
+                        << idx_odom_displ+1 << "): " << chi << std::endl;
 
-                    // Fill H and b (pose-pose):
-                    H_poses.block<3, 3>(H_i_idx, H_j_idx) += flatten_Ji.transpose() * flatten_Ji;
-                    H_poses.block<3, 3>(H_i_idx, H_j_idx) += flatten_Ji.transpose() * flatten_Jj;
-                    H_poses.block<3, 3>(H_j_idx, H_i_idx) += flatten_Jj.transpose() * flatten_Ji;
-                    H_poses.block<3, 3>(H_j_idx, H_j_idx) += flatten_Jj.transpose() * flatten_Jj;
-                    b_poses.segment<3>(H_i_idx) += flatten_Ji.transpose() * pose_error;
-                    b_poses.segment<3>(H_j_idx) += flatten_Jj.transpose() * pose_error;
+                    const float kernel_threshold_pose = 0.1f;
+                    bool is_inlier = true;
+                    if (chi > kernel_threshold_pose) {
+                        omega_pose *= std::sqrt(kernel_threshold_pose / chi);
+                        chi = kernel_threshold_pose;
+                        is_inlier = false;
+                    } else {
+                        ++num_inliers;
+                    }
+
+                    chi_tot += chi;
+
+                    // Jacobians (only on inliers):
+                    if (is_inlier || true) {
+                        int H_i_idx = pose_dim * idx_odom_displ;
+                        int H_j_idx = pose_dim * (idx_odom_displ+1);
+
+                        // Fill H and b (pose-pose):
+                        H_poses.block<3, 3>(H_i_idx, H_j_idx) += flatten_Ji.transpose() * omega_pose * flatten_Ji;
+                        H_poses.block<3, 3>(H_i_idx, H_j_idx) += flatten_Ji.transpose() * omega_pose * flatten_Jj;
+                        H_poses.block<3, 3>(H_j_idx, H_i_idx) += flatten_Jj.transpose() * omega_pose * flatten_Ji;
+                        H_poses.block<3, 3>(H_j_idx, H_j_idx) += flatten_Jj.transpose() * omega_pose * flatten_Jj;
+                        b_poses.segment<3>(H_i_idx) += flatten_Ji.transpose() * omega_pose * pose_error;
+                        b_poses.segment<3>(H_j_idx) += flatten_Jj.transpose() * omega_pose * pose_error;
+                    }
                 }
 
-                std::cout << "\tchi_tot: " << chi_tot << std::endl;
+                std::cout << "\t> num_inliers: " << num_inliers << " ("
+                    << 100.0f*num_inliers/odometry_displacement.size() << "%)" << std::endl;
+                std::cout << "\t> chi_tot: " << chi_tot << std::endl;
 
                 // 2. Build H, b
                 Eigen::MatrixXf H = H_projections + H_poses;
