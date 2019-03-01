@@ -116,16 +116,11 @@ int main() {
         estimated_trajectory.push_back(pose);
     }*/
 
+    // Pose-pose relation from odometry:
     std::vector<Eigen::Vector3f> odometry_displacement;
     for (int k = 1; k < NUM_MEASUREMENTS; ++k) {
         odometry_displacement.push_back(odom_trajectory[k] - odom_trajectory[k-1]);
     }
-
-    // TODO: algorithm to initialize the landmarks (reading from world.dat now)
-    /*std::vector<Eigen::Vector3f> estimated_landmarks;
-    for (const auto& landmark : landmarks) {
-        estimated_landmarks.push_back(landmark.position);
-    }*/
 
     // Vector containing all homogeneous camera projection matrices P:
     std::vector<Eigen::Matrix<float, 3, 4>> homogeneous_camera_projection_matrices(odom_trajectory.size());
@@ -347,7 +342,7 @@ int main() {
                              dlt_landmarks,
                              full_measurements, // landmark measurements
                              proj_pose_landmark_association,    // landmark data association
-                             //odometry_displacement,
+                             odometry_displacement,
                              //landmarks,
                              camera,
                              num_iterations,

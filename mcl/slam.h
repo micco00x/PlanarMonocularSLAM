@@ -10,6 +10,17 @@
 #include "unicycle.h"
 
 namespace mcl {
+
+    Eigen::VectorXf _flatten(const Eigen::MatrixXf& M) {
+        Eigen::VectorXf flattened_M(M.rows() * M.cols());
+        for (int r = 0; r < M.rows(); ++r) {
+            for (int c = 0; c < M.cols(); ++c) {
+                flattened_M(r * M.cols() + c) = M(r, c);
+            }
+        }
+        return flattened_M;
+    }
+
     namespace slam {
 
         namespace {
@@ -225,7 +236,7 @@ namespace mcl {
                            std::vector<Eigen::Vector3f>& estimated_landmarks,
                            const std::vector<mcl::Measurement>& full_measurements,
                            const std::vector<std::pair<int, int>>& proj_pose_landmark_association,
-                           //const std::vector<Eigen::Vector3f>& odometry_displacement,
+                           const std::vector<Eigen::Vector3f>& odometry_displacement,
                            //const std::vector<mcl::Landmark>& landmarks,
                            const mcl::Camera& camera,
                            const int num_iterations,
@@ -327,12 +338,78 @@ namespace mcl {
                     << 100.0f*num_inliers/full_measurements.size() << "%)" << std::endl;
                 std::cout << "\t> chi_tot: " << chi_tot << std::endl;
 
+                // Reset num_inliers and chi:
+                num_inliers = 0;
+                chi_tot = 0.0f;
+
                 // 1b. Linearize poses
-                // TODO.
+                Eigen::MatrixXf H_poses = Eigen::MatrixXf::Zero(system_size, system_size);
+                Eigen::VectorXf b_poses = Eigen::VectorXf::Zero(system_size);
+
+                std::cout << "* Linearize poses *" << std::endl;
+
+                for (int idx_odom_displ = 0; idx_odom_displ < odometry_displacement.size(); ++idx_odom_displ) {
+                    // odom_displ contains relation that can be used to describe
+                    // a transform from RF_{k+1} to RF_{k}:
+                    const auto& odom_displ = odometry_displacement[idx_odom_displ];
+
+                    const Eigen::Matrix3f Xr_i = mcl::v2t(estimated_trajectory[idx_odom_displ]);
+                    const Eigen::Matrix3f Xr_j = mcl::v2t(estimated_trajectory[idx_odom_displ+1]);
+                    const Eigen::Matrix3f Z_hat_ij = Xr_i.inverse() * Xr_j;
+                    const Eigen::Matrix3f Z_ij = mcl::v2t(odom_displ);
+                    Eigen::VectorXf pose_error = mcl::_flatten(Z_hat_ij - Z_ij);
+                    float chi = pose_error.squaredNorm();
+                    chi_tot += chi;
+
+                    // Computing partial derivative of v2t(-deltax_i) wrt deltax_i,
+                    // same as v2t(deltax_i)^T wrt deltax_i for small deltax_i,
+                    // deltax_i = (delta_txi, delta_tyi, delta_thetai)^T,
+                    // moreover eval in deltax_i = 0:
+                    Eigen::Matrix3f derivative_v2tdeltaxT_wrt_dtxi;
+                    derivative_v2tdeltaxT_wrt_dtxi << 0.0f, 0.0f, -1.0f,
+                                                      0.0f, 0.0f,  0.0f,
+                                                      0.0f, 0.0f,  0.0f;
+                    Eigen::Matrix3f derivative_v2tdeltaxT_wrt_dtyi;
+                    derivative_v2tdeltaxT_wrt_dtyi << 0.0f, 0.0f,  0.0f,
+                                                      0.0f, 0.0f, -1.0f,
+                                                      0.0f, 0.0f,  0.0f;
+                    Eigen::Matrix3f derivative_v2tdeltaxT_wrt_dthetai;
+                    derivative_v2tdeltaxT_wrt_dthetai << 0.0f, -1.0f, 0.0f,
+                                                         1.0f,  0.0f, 0.0f,
+                                                         0.0f,  0.0f, 0.0f;
+
+                    // Computing partial derivative of h(X boxplus dx) wrt deltax_i
+                    // and flatten it:
+                    Eigen::VectorXf flattened_derivative_h_wrt_dtxi = mcl::_flatten(Xr_i.inverse() * derivative_v2tdeltaxT_wrt_dtxi * Xr_j);
+                    Eigen::VectorXf flattened_derivative_h_wrt_dtyi = mcl::_flatten(Xr_i.inverse() * derivative_v2tdeltaxT_wrt_dtyi * Xr_j);
+                    Eigen::VectorXf flattened_derivative_h_wrt_dthetai = mcl::_flatten(Xr_i.inverse() * derivative_v2tdeltaxT_wrt_dthetai * Xr_j);
+
+                    // Chordal jacobian of h(X boxplus dx) wrt deltax_i:
+                    Eigen::Matrix<float, 9, 3> flatten_Ji;
+                    flatten_Ji.col(0) = flattened_derivative_h_wrt_dtxi;
+                    flatten_Ji.col(1) = flattened_derivative_h_wrt_dtyi;
+                    flatten_Ji.col(2) = flattened_derivative_h_wrt_dthetai;
+
+                    // Chordal jacobian of h(X boxplus dx) wrt deltax_j (deltax_i+1):
+                    Eigen::Matrix<float, 9, 3> flatten_Jj = -flatten_Ji;
+
+                    int H_i_idx = pose_dim * idx_odom_displ;
+                    int H_j_idx = pose_dim * (idx_odom_displ+1);
+
+                    // Fill H and b (pose-pose):
+                    H_poses.block<3, 3>(H_i_idx, H_j_idx) += flatten_Ji.transpose() * flatten_Ji;
+                    H_poses.block<3, 3>(H_i_idx, H_j_idx) += flatten_Ji.transpose() * flatten_Jj;
+                    H_poses.block<3, 3>(H_j_idx, H_i_idx) += flatten_Jj.transpose() * flatten_Ji;
+                    H_poses.block<3, 3>(H_j_idx, H_j_idx) += flatten_Jj.transpose() * flatten_Jj;
+                    b_poses.segment<3>(H_i_idx) += flatten_Ji.transpose() * pose_error;
+                    b_poses.segment<3>(H_j_idx) += flatten_Jj.transpose() * pose_error;
+                }
+
+                std::cout << "\tchi_tot: " << chi_tot << std::endl;
 
                 // 2. Build H, b
-                Eigen::MatrixXf H = H_projections;
-                Eigen::VectorXf b = b_projections;
+                Eigen::MatrixXf H = H_projections + H_poses;
+                Eigen::VectorXf b = b_projections + b_poses;
                 //H += H_projections;
                 //b += b_projections;
 
