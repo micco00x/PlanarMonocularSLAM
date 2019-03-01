@@ -239,7 +239,8 @@ namespace mcl {
                            const mcl::Camera& camera,
                            const int num_iterations,
                            const float damping,
-                           const float kernel_threshold) {
+                           const float kernel_threshold_proj,
+                           const float kernel_threshold_pose) {
 
             // Determine the size of the system Hdx+b=0:
             const int pose_dim = estimated_trajectory[0].rows(); // = 3 (x, y, theta)
@@ -250,12 +251,14 @@ namespace mcl {
             std::vector<Eigen::Vector3f> dx_landmark_vector(estimated_landmarks.size()); // NOTE: landmarks_dim must be 3
 
             // chi and inliers stats:
-            std::vector<std::pair<float, int>> chi_inliers_stats;
+            std::vector<std::pair<float, int>> chi_inliers_stats_proj;
+            std::vector<std::pair<float, int>> chi_inliers_stats_pose;
 
             for (int iteration = 0; iteration < num_iterations; ++iteration) {
                 std::cout << "LS iteration=" << iteration+1 << "/" << num_iterations << std::endl;
-                int num_inliers = 0;
-                float chi_tot = 0.0f;
+
+                int num_inliers_proj = 0;
+                float chi_tot_proj = 0.0f;
 
                 Eigen::MatrixXf H_projections = Eigen::MatrixXf::Zero(system_size, system_size);
                 Eigen::VectorXf b_projections = Eigen::VectorXf::Zero(system_size);
@@ -301,15 +304,15 @@ namespace mcl {
                         float chi = projection_error.squaredNorm();
 
                         bool is_inlier = true;
-                        if (chi > kernel_threshold) {
-                            projection_error *= std::sqrt(kernel_threshold / chi);
-                            chi = kernel_threshold;
+                        if (chi > kernel_threshold_proj) {
+                            projection_error *= std::sqrt(kernel_threshold_proj / chi);
+                            chi = kernel_threshold_proj;
                             is_inlier = false;
                         } else {
-                            ++num_inliers;
+                            ++num_inliers_proj;
                         }
 
-                        chi_tot += chi;
+                        chi_tot_proj += chi;
 
                         // Jacobians (only on inliers):
                         if (is_inlier) {
@@ -332,13 +335,12 @@ namespace mcl {
                     ++meas_idx;
                 }
 
-                std::cout << "\t> num_inliers: " << num_inliers << " ("
-                    << 100.0f*num_inliers/full_measurements.size() << "%)" << std::endl;
-                std::cout << "\t> chi_tot: " << chi_tot << std::endl;
+                std::cout << "\t> num_inliers_proj: " << num_inliers_proj << " ("
+                    << 100.0f*num_inliers_proj/full_measurements.size() << "%)" << std::endl;
+                std::cout << "\t> chi_tot_proj: " << chi_tot_proj << std::endl;
 
-                // Reset num_inliers and chi:
-                num_inliers = 0;
-                chi_tot = 0.0f;
+                int num_inliers_pose = 0;
+                float chi_tot_pose = 0.0f;
 
                 // 1b. Linearize poses
                 Eigen::MatrixXf H_poses = Eigen::MatrixXf::Zero(system_size, system_size);
@@ -351,6 +353,11 @@ namespace mcl {
                     // a transform from RF_{k+1} to RF_{k}:
                     const auto& odom_displ = odometry_displacement[idx_odom_displ];
 
+                    // TODO: since the last row of the partial derivative is
+                    //       always zero, you can optimize the performances by
+                    //       just considering the upper part, as also explained
+                    //       in probabilistic_robotics_26_multipose_registration.pdf
+                    //       (SEE: applications/octave/26_total_least_squares).
                     const Eigen::Matrix3f Xr_i = mcl::v2t(estimated_trajectory[idx_odom_displ]);
                     const Eigen::Matrix3f Xr_j = mcl::v2t(estimated_trajectory[idx_odom_displ+1]);
                     const Eigen::Matrix3f Z_hat_ij = Xr_i.inverse() * Xr_j;
@@ -392,23 +399,21 @@ namespace mcl {
                     // Apply kernel threshold before defining Jacobians:
                     Eigen::MatrixXf omega_pose = Eigen::MatrixXf::Identity(pose_error.rows(), pose_error.rows()); // should be 9x9 anyway
                     float chi = pose_error.transpose() * omega_pose * pose_error;
-                    std::cout << "chi(" << idx_odom_displ << ", "
-                        << idx_odom_displ+1 << "): " << chi << std::endl;
 
-                    const float kernel_threshold_pose = 0.1f;
                     bool is_inlier = true;
                     if (chi > kernel_threshold_pose) {
                         omega_pose *= std::sqrt(kernel_threshold_pose / chi);
                         chi = kernel_threshold_pose;
                         is_inlier = false;
                     } else {
-                        ++num_inliers;
+                        ++num_inliers_pose;
                     }
 
-                    chi_tot += chi;
+                    chi_tot_pose += chi;
 
                     // Jacobians (only on inliers):
-                    if (is_inlier || true) {
+                    bool keep_outliers_pose = true; // TODO: move this to params
+                    if (is_inlier || keep_outliers_pose) {
                         int H_i_idx = pose_dim * idx_odom_displ;
                         int H_j_idx = pose_dim * (idx_odom_displ+1);
 
@@ -422,9 +427,9 @@ namespace mcl {
                     }
                 }
 
-                std::cout << "\t> num_inliers: " << num_inliers << " ("
-                    << 100.0f*num_inliers/odometry_displacement.size() << "%)" << std::endl;
-                std::cout << "\t> chi_tot: " << chi_tot << std::endl;
+                std::cout << "\t> num_inliers_pose: " << num_inliers_pose << " ("
+                    << 100.0f*num_inliers_pose/odometry_displacement.size() << "%)" << std::endl;
+                std::cout << "\t> chi_tot_pose: " << chi_tot_pose << std::endl;
 
                 // 2. Build H, b
                 Eigen::MatrixXf H = H_projections + H_poses;
@@ -451,12 +456,21 @@ namespace mcl {
                 iter_boxplus(estimated_landmarks, dx_landmark_vector, boxplus_euclidean);
 
                 // Update statistics:
-                chi_inliers_stats.push_back(std::make_pair(chi_tot, num_inliers));
+                chi_inliers_stats_proj.push_back(std::make_pair(chi_tot_proj, num_inliers_proj));
+                chi_inliers_stats_pose.push_back(std::make_pair(chi_tot_pose, num_inliers_pose));
             }
 
             // Print statistics about chi and inliers for each iteration:
-            std::cout << "*** CHI/INLIERS STATS ***" << std::endl;
-            for (const auto& chi_inliers : chi_inliers_stats) {
+            std::cout << "*** CHI/INLIERS STATS PROJ ***" << std::endl;
+            for (const auto& chi_inliers : chi_inliers_stats_proj) {
+                std::cout << std::setw(10)
+                    << std::setprecision(3) << chi_inliers.first
+                    << std::setw(10) << chi_inliers.second
+                    << " (" << 100.0f*chi_inliers.second/full_measurements.size() << "%)"
+                    << std::endl;
+            }
+            std::cout << "*** CHI/INLIERS STATS POSE ***" << std::endl;
+            for (const auto& chi_inliers : chi_inliers_stats_pose) {
                 std::cout << std::setw(10)
                     << std::setprecision(3) << chi_inliers.first
                     << std::setw(10) << chi_inliers.second

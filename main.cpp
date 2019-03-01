@@ -336,7 +336,8 @@ int main() {
 
     int num_iterations = 15;
     float damping = 0.0f;
-    float kernel_threshold = 20000.0f; // sqrt(1000)=31.62[px], sqrt(10000)=100.00[px], sqrt(20000)=141.42[px]
+    float kernel_threshold_proj = 20000.0f; // sqrt(1000)=31.62[px], sqrt(10000)=100.00[px], sqrt(20000)=141.42[px]
+    float kernel_threshold_pose = 0.1f;
     std::cout << "*** Least Squares ***" << std::endl;
     mcl::slam::least_squares(odom_trajectory,
                              dlt_landmarks,
@@ -347,7 +348,8 @@ int main() {
                              camera,
                              num_iterations,
                              damping,
-                             kernel_threshold);
+                             kernel_threshold_proj,
+                             kernel_threshold_pose);
 
      std::ofstream ls_slam_file("bin/ls_slam_trajectory.dat");
      for (const auto& pose : odom_trajectory) {
