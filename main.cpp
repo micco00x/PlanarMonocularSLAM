@@ -168,14 +168,14 @@ int main() {
             Eigen::JacobiSVD<Eigen::MatrixXf> svd(dlt_A, Eigen::ComputeThinU | Eigen::ComputeThinV);
             Eigen::Vector4f landmark_pos_init_estimate_hom = svd.matrixV().rightCols(1).col(0);
             Eigen::Vector3f landmark_pos_init_estimate = mcl::to_inhomogeneous(landmark_pos_init_estimate_hom);
-            std::cout << "Landmark " << k << ". gt: " << landmarks[k].position.transpose()
-                << " - estimate: " << landmark_pos_init_estimate.transpose()
-                << " - error: " << (landmarks[k].position - landmark_pos_init_estimate).transpose()
-                << std::endl;
+            //std::cout << "Landmark " << k << ". gt: " << landmarks[k].position.transpose()
+            //    << " - estimate: " << landmark_pos_init_estimate.transpose()
+            //    << " - error: " << (landmarks[k].position - landmark_pos_init_estimate).transpose()
+            //    << std::endl;
             dlt_landmarks_id_to_idx[k] = dlt_landmarks.size();
             dlt_landmarks.push_back(landmark_pos_init_estimate);
         } else {
-            std::cout << "CANNOT DETERMINE LANDMARK id=" << k << std::endl;
+            //std::cout << "CANNOT DETERMINE LANDMARK id=" << k << std::endl;
             discarded_landmark_ids.insert(k);
         }
     }

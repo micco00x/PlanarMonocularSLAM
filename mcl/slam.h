@@ -346,8 +346,6 @@ namespace mcl {
                 Eigen::MatrixXf H_poses = Eigen::MatrixXf::Zero(system_size, system_size);
                 Eigen::VectorXf b_poses = Eigen::VectorXf::Zero(system_size);
 
-                std::cout << "* Linearize poses *" << std::endl;
-
                 for (int idx_odom_displ = 0; idx_odom_displ < odometry_displacement.size(); ++idx_odom_displ) {
                     // odom_displ contains relation that can be used to describe
                     // a transform from RF_{k+1} to RF_{k}:
@@ -398,6 +396,7 @@ namespace mcl {
 
                     // Apply kernel threshold before defining Jacobians:
                     Eigen::MatrixXf omega_pose = Eigen::MatrixXf::Identity(pose_error.rows(), pose_error.rows()); // should be 9x9 anyway
+                    //omega_pose.block<6, 6>(0, 0) *= 0.001f;
                     float chi = pose_error.transpose() * omega_pose * pose_error;
 
                     bool is_inlier = true;
@@ -434,8 +433,6 @@ namespace mcl {
                 // 2. Build H, b
                 Eigen::MatrixXf H = H_projections + H_poses;
                 Eigen::VectorXf b = b_projections + b_poses;
-                //H += H_projections;
-                //b += b_projections;
 
                 // Add dumping to H:
                 //H += damping * Eigen::MatrixXf::Identity(system_size, system_size);
