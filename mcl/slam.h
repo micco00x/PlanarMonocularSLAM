@@ -398,7 +398,8 @@ namespace mcl {
                     Eigen::MatrixXf omega_pose = Eigen::MatrixXf::Identity(pose_error.rows(), pose_error.rows()); // should be 9x9 anyway
                     //omega_pose.block<6, 6>(0, 0) *= 0.001f;
                     float chi = pose_error.transpose() * omega_pose * pose_error;
-
+                    std::cout << "chi(" << idx_odom_displ << ", "
+                        << idx_odom_displ+1 << "): " << chi << std::endl;
                     bool is_inlier = true;
                     if (chi > kernel_threshold_pose) {
                         omega_pose *= std::sqrt(kernel_threshold_pose / chi);
@@ -411,13 +412,13 @@ namespace mcl {
                     chi_tot_pose += chi;
 
                     // Jacobians (only on inliers):
-                    bool keep_outliers_pose = true; // TODO: move this to params
+                    bool keep_outliers_pose = false; // TODO: move this to params
                     if (is_inlier || keep_outliers_pose) {
                         int H_i_idx = pose_dim * idx_odom_displ;
                         int H_j_idx = pose_dim * (idx_odom_displ+1);
 
                         // Fill H and b (pose-pose):
-                        H_poses.block<3, 3>(H_i_idx, H_j_idx) += flatten_Ji.transpose() * omega_pose * flatten_Ji;
+                        H_poses.block<3, 3>(H_i_idx, H_i_idx) += flatten_Ji.transpose() * omega_pose * flatten_Ji;
                         H_poses.block<3, 3>(H_i_idx, H_j_idx) += flatten_Ji.transpose() * omega_pose * flatten_Jj;
                         H_poses.block<3, 3>(H_j_idx, H_i_idx) += flatten_Jj.transpose() * omega_pose * flatten_Ji;
                         H_poses.block<3, 3>(H_j_idx, H_j_idx) += flatten_Jj.transpose() * omega_pose * flatten_Jj;
@@ -471,7 +472,7 @@ namespace mcl {
                 std::cout << std::setw(10)
                     << std::setprecision(3) << chi_inliers.first
                     << std::setw(10) << chi_inliers.second
-                    << " (" << 100.0f*chi_inliers.second/full_measurements.size() << "%)"
+                    << " (" << 100.0f*chi_inliers.second/odometry_displacement.size() << "%)"
                     << std::endl;
             }
         } // end least_squares()
