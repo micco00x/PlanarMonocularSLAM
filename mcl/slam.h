@@ -263,8 +263,8 @@ namespace mcl {
                 Eigen::VectorXf b_projections = Eigen::VectorXf::Zero(system_size);
 
                 // 1a. Linearize proj()
-                int meas_idx = 0;
-                for (const auto& meas : full_measurements) {
+                for (int meas_idx = 0; meas_idx < full_measurements.size(); ++meas_idx) {
+                    const auto& meas = full_measurements[meas_idx];
 
                     // Compute derivative of proj(x+dx) wrt dx eval in dx=0:
                     int pose_idx    = proj_pose_landmark_association[meas_idx].first;
@@ -279,6 +279,26 @@ namespace mcl {
                     Eigen::Vector3f Kpcam = camera.matrix * pcam;
                     Eigen::Vector2f proj_Kpcam(Kpcam.x() / Kpcam.z(),
                                                Kpcam.y() / Kpcam.z());
+
+                    // Apply kernel threshold before defining the Jacobians:
+                    Eigen::Vector2f projection_error = proj_Kpcam - Eigen::Vector2f(meas.u, meas.v);
+                    float chi = projection_error.squaredNorm();
+
+                    bool is_inlier = true;
+                    if (chi > kernel_threshold_proj) {
+                       projection_error *= std::sqrt(kernel_threshold_proj / chi);
+                       chi = kernel_threshold_proj;
+                       is_inlier = false;
+                    } else {
+                       ++num_inliers_proj;
+                    }
+
+                    chi_tot_proj += chi;
+
+                    // Discard outliers:
+                    if (!is_inlier) {
+                        continue; // skip this iteration
+                    }
 
                     // Check that proj_Kpcam is feasible:
                     if (camera.is_pcam_valid(pcam) && camera.is_uv_valid(proj_Kpcam)) {
@@ -298,40 +318,22 @@ namespace mcl {
                         // Derivative Kpcam wrt dx (landmark part x, y, z):
                         Eigen::Matrix3f derivative_Kpcam_wrt_dxl = camera.matrix * T_world2camera.block<3, 3>(0, 0);
 
-                        // Apply kernel threshold before defining the Jacobians:
-                        Eigen::Vector2f projection_error = proj_Kpcam - Eigen::Vector2f(meas.u, meas.v);
-                        float chi = projection_error.squaredNorm();
+                        // Jacobians of proj() wrt robot and landmark:
+                        Eigen::Matrix<float, 2, 3> Jr = derivative_proj_wrt_Kpcam * derivative_Kpcam_wrt_dxr;
+                        Eigen::Matrix<float, 2, 3> Jl = derivative_proj_wrt_Kpcam * derivative_Kpcam_wrt_dxl;
 
-                        bool is_inlier = true;
-                        if (chi > kernel_threshold_proj) {
-                            projection_error *= std::sqrt(kernel_threshold_proj / chi);
-                            chi = kernel_threshold_proj;
-                            is_inlier = false;
-                        } else {
-                            ++num_inliers_proj;
-                        }
+                        // Indices of robot and landmark:
+                        int H_r_idx = pose_dim * pose_idx;
+                        int H_l_idx = pose_dim * estimated_trajectory.size() + landmarks_dim * landmark_id;
 
-                        chi_tot_proj += chi;
-
-                        // Jacobians (only on inliers):
-                        if (is_inlier) {
-                            Eigen::Matrix<float, 2, 3> Jr = derivative_proj_wrt_Kpcam * derivative_Kpcam_wrt_dxr;
-                            Eigen::Matrix<float, 2, 3> Jl = derivative_proj_wrt_Kpcam * derivative_Kpcam_wrt_dxl;
-
-                            int H_r_idx = pose_dim * pose_idx;
-                            int H_l_idx = pose_dim * estimated_trajectory.size() + landmarks_dim * landmark_id;
-
-                            // Fill H and b (projections):
-                            H_projections.block<3, 3>(H_r_idx, H_r_idx) += Jr.transpose() * Jr;
-                            H_projections.block<3, 3>(H_r_idx, H_l_idx) += Jr.transpose() * Jl;
-                            H_projections.block<3, 3>(H_l_idx, H_r_idx) += Jl.transpose() * Jr;
-                            H_projections.block<3, 3>(H_l_idx, H_l_idx) += Jl.transpose() * Jl;
-                            b_projections.segment<3>(H_r_idx) += Jr.transpose() * projection_error;
-                            b_projections.segment<3>(H_l_idx) += Jl.transpose() * projection_error;
-                        }
+                        // Fill H and b (projections):
+                        H_projections.block<3, 3>(H_r_idx, H_r_idx) += Jr.transpose() * Jr;
+                        H_projections.block<3, 3>(H_r_idx, H_l_idx) += Jr.transpose() * Jl;
+                        H_projections.block<3, 3>(H_l_idx, H_r_idx) += Jl.transpose() * Jr;
+                        H_projections.block<3, 3>(H_l_idx, H_l_idx) += Jl.transpose() * Jl;
+                        b_projections.segment<3>(H_r_idx) += Jr.transpose() * projection_error;
+                        b_projections.segment<3>(H_l_idx) += Jl.transpose() * projection_error;
                     }
-
-                    ++meas_idx;
                 }
 
                 std::cout << "\t> num_inliers_proj: " << num_inliers_proj << " ("
@@ -360,6 +362,27 @@ namespace mcl {
                     const Eigen::Matrix3f Z_hat_ij = Xr_i.inverse() * Xr_j;
                     const Eigen::Matrix3f Z_ij = mcl::v2t(odom_displ);
                     Eigen::VectorXf pose_error = mcl::_flatten_by_cols(Z_hat_ij - Z_ij);
+
+                    // Apply kernel threshold before defining Jacobians:
+                    Eigen::MatrixXf omega_pose = Eigen::MatrixXf::Identity(pose_error.rows(), pose_error.rows()); // should be 9x9 anyway
+                    //omega_pose.block<6, 6>(0, 0) *= 0.001f;
+                    float chi = pose_error.transpose() * omega_pose * pose_error;
+                    bool is_inlier = true;
+                    if (chi > kernel_threshold_pose) {
+                        omega_pose *= std::sqrt(kernel_threshold_pose / chi);
+                        chi = kernel_threshold_pose;
+                        is_inlier = false;
+                    } else {
+                        ++num_inliers_pose;
+                    }
+
+                    chi_tot_pose += chi;
+
+                    // Jacobians (only on inliers):
+                    bool keep_outliers_pose = false; // TODO: move this to params
+                    if (!(is_inlier || keep_outliers_pose)) {
+                        continue; // skip this iteration
+                    }
 
                     // Computing partial derivative of v2t(-deltax_i) wrt deltax_i,
                     // same as v2t(deltax_i)^T wrt deltax_i for small deltax_i,
@@ -393,37 +416,17 @@ namespace mcl {
                     // Chordal jacobian of h(X boxplus dx) wrt deltax_j (deltax_i+1):
                     Eigen::Matrix<float, 9, 3> flatten_Jj = -flatten_Ji;
 
-                    // Apply kernel threshold before defining Jacobians:
-                    Eigen::MatrixXf omega_pose = Eigen::MatrixXf::Identity(pose_error.rows(), pose_error.rows()); // should be 9x9 anyway
-                    //omega_pose.block<6, 6>(0, 0) *= 0.001f;
-                    float chi = pose_error.transpose() * omega_pose * pose_error;
-                    std::cout << "chi(" << idx_odom_displ << ", "
-                        << idx_odom_displ+1 << "): " << chi << std::endl;
-                    bool is_inlier = true;
-                    if (chi > kernel_threshold_pose) {
-                        omega_pose *= std::sqrt(kernel_threshold_pose / chi);
-                        chi = kernel_threshold_pose;
-                        is_inlier = false;
-                    } else {
-                        ++num_inliers_pose;
-                    }
+                    // Indices of the two robots:
+                    int H_i_idx = pose_dim * idx_odom_displ;
+                    int H_j_idx = pose_dim * (idx_odom_displ+1);
 
-                    chi_tot_pose += chi;
-
-                    // Jacobians (only on inliers):
-                    bool keep_outliers_pose = false; // TODO: move this to params
-                    if (is_inlier || keep_outliers_pose) {
-                        int H_i_idx = pose_dim * idx_odom_displ;
-                        int H_j_idx = pose_dim * (idx_odom_displ+1);
-
-                        // Fill H and b (pose-pose):
-                        H_poses.block<3, 3>(H_i_idx, H_i_idx) += flatten_Ji.transpose() * omega_pose * flatten_Ji;
-                        H_poses.block<3, 3>(H_i_idx, H_j_idx) += flatten_Ji.transpose() * omega_pose * flatten_Jj;
-                        H_poses.block<3, 3>(H_j_idx, H_i_idx) += flatten_Jj.transpose() * omega_pose * flatten_Ji;
-                        H_poses.block<3, 3>(H_j_idx, H_j_idx) += flatten_Jj.transpose() * omega_pose * flatten_Jj;
-                        b_poses.segment<3>(H_i_idx) += flatten_Ji.transpose() * omega_pose * pose_error;
-                        b_poses.segment<3>(H_j_idx) += flatten_Jj.transpose() * omega_pose * pose_error;
-                    }
+                    // Fill H and b (pose-pose):
+                    H_poses.block<3, 3>(H_i_idx, H_i_idx) += flatten_Ji.transpose() * omega_pose * flatten_Ji;
+                    H_poses.block<3, 3>(H_i_idx, H_j_idx) += flatten_Ji.transpose() * omega_pose * flatten_Jj;
+                    H_poses.block<3, 3>(H_j_idx, H_i_idx) += flatten_Jj.transpose() * omega_pose * flatten_Ji;
+                    H_poses.block<3, 3>(H_j_idx, H_j_idx) += flatten_Jj.transpose() * omega_pose * flatten_Jj;
+                    b_poses.segment<3>(H_i_idx) += flatten_Ji.transpose() * omega_pose * pose_error;
+                    b_poses.segment<3>(H_j_idx) += flatten_Jj.transpose() * omega_pose * pose_error;
                 }
 
                 std::cout << "\t> num_inliers_pose: " << num_inliers_pose << " ("
