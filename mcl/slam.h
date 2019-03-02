@@ -235,7 +235,6 @@ namespace mcl {
                            const std::vector<mcl::Measurement>& full_measurements,
                            const std::vector<std::pair<int, int>>& proj_pose_landmark_association,
                            const std::vector<Eigen::Vector3f>& odometry_displacement,
-                           //const std::vector<mcl::Landmark>& landmarks,
                            const mcl::Camera& camera,
                            const int num_iterations,
                            const float damping,

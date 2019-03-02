@@ -119,6 +119,8 @@ int main() {
     // Pose-pose relation from odometry:
     std::vector<Eigen::Vector3f> odometry_displacement;
     for (int k = 1; k < NUM_MEASUREMENTS; ++k) {
+        // TODO: displ can be determined more efficiently with
+        //       [R^T(theta1)(t1-t0); theta1-theta0].
         Eigen::Vector3f displ = mcl::t2v(mcl::v2t(gt_trajectory[k-1]).inverse() *
                                          mcl::v2t(gt_trajectory[k]));
         odometry_displacement.push_back(displ);
@@ -346,7 +348,6 @@ int main() {
                              full_measurements, // landmark measurements
                              proj_pose_landmark_association,    // landmark data association
                              odometry_displacement,
-                             //landmarks,
                              camera,
                              num_iterations,
                              damping,
