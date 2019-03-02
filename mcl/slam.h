@@ -327,12 +327,15 @@ namespace mcl {
                         int H_l_idx = pose_dim * estimated_trajectory.size() + landmarks_dim * landmark_id;
 
                         // Fill H and b (projections):
-                        H_projections.block<3, 3>(H_r_idx, H_r_idx) += Jr.transpose() * Jr;
-                        H_projections.block<3, 3>(H_r_idx, H_l_idx) += Jr.transpose() * Jl;
-                        H_projections.block<3, 3>(H_l_idx, H_r_idx) += Jl.transpose() * Jr;
-                        H_projections.block<3, 3>(H_l_idx, H_l_idx) += Jl.transpose() * Jl;
-                        b_projections.segment<3>(H_r_idx) += Jr.transpose() * projection_error;
-                        b_projections.segment<3>(H_l_idx) += Jl.transpose() * projection_error;
+                        const Eigen::MatrixXf omega_proj = 0.01f *
+                            Eigen::MatrixXf::Identity(projection_error.rows(),
+                                                      projection_error.rows()); // should be 2x2 anyway
+                        H_projections.block<3, 3>(H_r_idx, H_r_idx) += Jr.transpose() * omega_proj * Jr;
+                        H_projections.block<3, 3>(H_r_idx, H_l_idx) += Jr.transpose() * omega_proj * Jl;
+                        H_projections.block<3, 3>(H_l_idx, H_r_idx) += Jl.transpose() * omega_proj * Jr;
+                        H_projections.block<3, 3>(H_l_idx, H_l_idx) += Jl.transpose() * omega_proj * Jl;
+                        b_projections.segment<3>(H_r_idx) += Jr.transpose() * omega_proj * projection_error;
+                        b_projections.segment<3>(H_l_idx) += Jl.transpose() * omega_proj * projection_error;
                     }
                 }
 
