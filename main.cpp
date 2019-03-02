@@ -121,8 +121,8 @@ int main() {
     for (int k = 1; k < NUM_MEASUREMENTS; ++k) {
         // TODO: displ can be determined more efficiently with
         //       [R^T(theta1)(t1-t0); theta1-theta0].
-        Eigen::Vector3f displ = mcl::t2v(mcl::v2t(gt_trajectory[k-1]).inverse() *
-                                         mcl::v2t(gt_trajectory[k]));
+        Eigen::Vector3f displ = mcl::t2v(mcl::v2t(odom_trajectory[k-1]).inverse() *
+                                         mcl::v2t(odom_trajectory[k]));
         odometry_displacement.push_back(displ);
     }
 
@@ -341,7 +341,7 @@ int main() {
     int num_iterations = 15;
     float damping = 0.0f;
     float kernel_threshold_proj = 20000.0f; // sqrt(1000)=31.62[px], sqrt(10000)=100.00[px], sqrt(20000)=141.42[px]
-    float kernel_threshold_pose = 0.005f;
+    float kernel_threshold_pose = 0.01f;
     std::cout << "*** Least Squares ***" << std::endl;
     mcl::slam::least_squares(odom_trajectory,
                              dlt_landmarks,
