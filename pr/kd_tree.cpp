@@ -193,7 +193,7 @@ namespace pr {
         assert(points[i].rows()==dimension); // sanity check
         mean+=points[i];
       }
-      double inverse_num_points=1.0d/points.size();
+      double inverse_num_points=1.0/points.size();
       mean*=inverse_num_points;
 
       // compute the covariance;
