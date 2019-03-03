@@ -38,6 +38,7 @@ namespace pr {
       //! @param maximum distance allowed for a point
       //! @returns the distance of the closest point. -1 if no point found within range
       virtual double findNeighbor(Eigen::VectorXd& answer,
+                      size_t& answer_idx,
     			      const Eigen::VectorXd& query,
     			      const double max_distance) const =0;
 
@@ -64,29 +65,36 @@ namespace pr {
       //! accessor to the point vector
       VectorXdVector& points()  {return _points;}
 
+      //! accessor to idxs vector
+      std::vector<size_t>& idxs() {return _idxs;}
+
       //! function to search for the neighbors. Performs a linear search in the vector
       //! @param answer: the neighbor found
       //! @param query: the point to search
       //! @param maximum distance allowed for a point
       //! @returns the distance of the closest point. -1 if no point found within range
       virtual double findNeighbor(Eigen::VectorXd& answer,
+                      size_t& answer_idx,
     			      const Eigen::VectorXd& query,
     			      const double max_distance) const{
-        float d_max=std::numeric_limits<double>::max();
-        for(size_t i=0; i<_points.size(); i++){
-          float d=(_points[i]-query).squaredNorm();
-          if (d<d_max){
-    	answer=_points[i];
-    	d_max=d;
+        float d_max = std::numeric_limits<double>::max();
+        for(size_t i = 0; i < _points.size(); ++i) {
+          float d = (_points[i] - query).squaredNorm();
+          if (d < d_max) {
+            answer = _points[i];
+            answer_idx = _idxs[i];
+            d_max = d;
           }
         }
-        if (d_max>max_distance*max_distance)
-          return -1;
+        if (d_max > max_distance * max_distance) {
+            return -1;
+        }
         return d_max;
       }
 
     protected:
       VectorXdVector _points; //< points stored in the leaf
+      std::vector<size_t> _idxs; // original indices of the points
     };
 
 
@@ -143,14 +151,15 @@ namespace pr {
       //! @param maximum distance allowed for a point
       //! @returns the distance of the closest point. -1 if no point found within range
       virtual double findNeighbor(Eigen::VectorXd& answer,
+                  size_t& answer_idx,
     		      const Eigen::VectorXd& query,
     		      const double max_distance) const{
         bool is_left=side(query);
         if(is_left && _left_child) {
-          return _left_child->findNeighbor(answer, query, max_distance);
+          return _left_child->findNeighbor(answer, answer_idx, query, max_distance);
         }
         if(!is_left && _right_child) {
-          return _right_child->findNeighbor(answer, query, max_distance);
+          return _right_child->findNeighbor(answer, answer_idx, query, max_distance);
         }
         return -1;
       }
@@ -174,8 +183,10 @@ namespace pr {
     @returns the distance of the farthest point from the plane
     */
     double splitPoints(VectorXd& mean, VectorXd& normal,
-    		   VectorXdVector& left, VectorXdVector& right,
-    		   const VectorXdVector& points){
+    		   VectorXdVector& left, std::vector<size_t>& left_idxs,
+               VectorXdVector& right, std::vector<size_t>& right_idxs,
+    		   const VectorXdVector& points,
+               const std::vector<size_t>& idxs){
       // if points empty, nothing to do
       if(! points.size()){
         left.clear();
@@ -232,9 +243,11 @@ namespace pr {
         bool side=distance_from_plane<0;
         if (side) {
           left[num_left]=points[i];
+          left_idxs.push_back(idxs[i]);
           num_left++;
         } else {
           right[num_right]=points[i];
+          right_idxs.push_back(idxs[i]);
           num_right++;
         }
       }
@@ -250,10 +263,13 @@ namespace pr {
 
     //! helper function to buil;d a tree
     //! @param points: the points
+    //! @param idxs: original indices of the points
     //! @param max_leaf_range: specify the size of the "box" below which a leaf node is generated
     //! returns the root of the search tree
     BaseTreeNode* buildTree(const VectorXdVector& points,
+                const std::vector<size_t>& idxs,
     			double max_leaf_range) {
+      assert(points.size() == idxs.size());
       if (points.size()==0)
         return 0;
       int dimension=points[0].rows();
@@ -262,22 +278,26 @@ namespace pr {
       VectorXd normal;
       VectorXdVector left_points;
       VectorXdVector right_points;
+      std::vector<size_t> left_idxs;
+      std::vector<size_t> right_idxs;
 
       double range=splitPoints(mean, normal,
-    			   left_points, right_points,
-    			   points);
+    			   left_points, left_idxs,
+                   right_points, right_idxs,
+    			   points, idxs);
 
       if (range<max_leaf_range){
         LeafNode* node=new LeafNode(dimension);
         node->points()=points;
+        node->idxs() = idxs;
         return node;
       }
 
       MiddleNode* node=new MiddleNode(dimension,
     				  mean,
     				  normal,
-    				  buildTree(left_points,max_leaf_range), // left child
-    				  buildTree(right_points,max_leaf_range) // right child
+    				  buildTree(left_points, left_idxs, max_leaf_range), // left child
+    				  buildTree(right_points, right_idxs, max_leaf_range) // right child
     				  );
       return node;
     }

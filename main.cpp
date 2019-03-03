@@ -13,6 +13,8 @@
 #include "mcl/slam.h"
 #include "utils.h"
 
+#include "pr/kd_tree.h"
+
 int main() {
     std::string info_string;
     std::string dummy_string;
@@ -46,6 +48,32 @@ int main() {
         landmarks.push_back(landmark);
     }
 
+    // Build K-d tree from landmarks gt:
+    pr::VectorXdVector appearance_pts;
+    std::vector<size_t> appearance_idxs;
+    for (size_t idx_landmark = 0; idx_landmark < landmarks.size(); ++idx_landmark) {
+        appearance_pts.push_back(landmarks[idx_landmark].appearance);
+        appearance_idxs.push_back(idx_landmark);
+    }
+
+    double leaf_range = 0.1;
+    pr::BaseTreeNode* kd_tree = pr::buildTree(appearance_pts, appearance_idxs, leaf_range);
+
+    // Query with gt:
+    double max_distance = 0.2;
+    /*for (size_t idx_landmark = 0; idx_landmark < landmarks.size(); ++idx_landmark) {
+        Eigen::VectorXd answer;
+        size_t answer_idx;
+        double dist = kd_tree->findNeighbor(answer, answer_idx,
+                                            landmarks[idx_landmark].appearance,
+                                            max_distance);
+        std::cout << "idx_gt: " << idx_landmark
+            << " - idx_kd: " << answer_idx << std::endl;
+        std::cout << "\tapp gt: " << landmarks[idx_landmark].appearance.transpose() << std::endl;
+        std::cout << "\tanswer: " << answer.transpose() << std::endl;
+        std::cout << "\tdist: " << dist << std::endl;
+    }*/
+
     // Read data of the measurements from file(s):
     for (int k = 0; k < NUM_MEASUREMENTS; ++k) {
         std::stringstream ss;
@@ -67,7 +95,17 @@ int main() {
                 mcl::Measurement meas;
                 std::istringstream iss(info_string);
                 iss >> dummy_string >> meas;
-                v_meas.push_back(meas);
+                //v_meas.push_back(meas);
+
+                // Add measurements only if it is a known landmark:
+                Eigen::VectorXd answer;
+                size_t answer_idx;
+                double dist = kd_tree->findNeighbor(answer, answer_idx,
+                                                    meas.appearance,
+                                                    max_distance);
+                if (dist != -1) {
+                    v_meas.push_back(meas);
+                }
             }
         }
         measurements.push_back(v_meas);
@@ -154,10 +192,17 @@ int main() {
         const Eigen::Matrix<float, 1, 4> p_row2 = homogeneous_camera_projection_matrices[k].block<1, 4>(1, 0);
         const Eigen::Matrix<float, 1, 4> p_row3 = homogeneous_camera_projection_matrices[k].block<1, 4>(2, 0);
         for (const auto& meas : meas_v) {
-            int curr_n_rows = dlt_matrices[meas.gt_landmark_id].rows();
-            dlt_matrices[meas.gt_landmark_id].conservativeResize(curr_n_rows + 2, Eigen::NoChange);
-            dlt_matrices[meas.gt_landmark_id].row(curr_n_rows  ) = meas.v * p_row3 - p_row2;
-            dlt_matrices[meas.gt_landmark_id].row(curr_n_rows+1) = meas.u * p_row3 - p_row1;
+            //size_t landmark_idx = meas.gt_landmark_id;
+            Eigen::VectorXd answer;
+            size_t answer_idx;
+            kd_tree->findNeighbor(answer, answer_idx,
+                                  meas.appearance,
+                                  max_distance);
+            size_t landmark_idx = answer_idx;
+            int curr_n_rows = dlt_matrices[landmark_idx].rows();
+            dlt_matrices[landmark_idx].conservativeResize(curr_n_rows + 2, Eigen::NoChange);
+            dlt_matrices[landmark_idx].row(curr_n_rows  ) = meas.v * p_row3 - p_row2;
+            dlt_matrices[landmark_idx].row(curr_n_rows+1) = meas.u * p_row3 - p_row1;
         }
     }
 
@@ -197,9 +242,16 @@ int main() {
     for (const auto& c_it : measurements) {
         for (const auto& c_meas_it : c_it) {
             // Add measurement only if the landmark has not been discarded:
-            if (discarded_landmark_ids.find(c_meas_it.gt_landmark_id) == discarded_landmark_ids.end()) {
+            //size_t landmark_idx = c_meas_it.gt_landmark_id;
+            Eigen::VectorXd answer;
+            size_t answer_idx;
+            kd_tree->findNeighbor(answer, answer_idx,
+                                  c_meas_it.appearance,
+                                  max_distance);
+            size_t landmark_idx = answer_idx;
+            if (discarded_landmark_ids.find(landmark_idx) == discarded_landmark_ids.end()) {
                 full_measurements.push_back(c_meas_it);
-                proj_pose_landmark_association.push_back(std::make_pair(c_it_idx, dlt_landmarks_id_to_idx[c_meas_it.gt_landmark_id]));
+                proj_pose_landmark_association.push_back(std::make_pair(c_it_idx, dlt_landmarks_id_to_idx[landmark_idx]));
             }
         }
         ++c_it_idx;

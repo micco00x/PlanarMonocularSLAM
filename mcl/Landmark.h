@@ -6,6 +6,6 @@ namespace mcl {
     struct Landmark {
         unsigned int id;
         Eigen::Vector3f position;
-        Eigen::Matrix<float, mcl::APPEARANCE_SIZE, 1> appearance;
+        Eigen::Matrix<double, mcl::APPEARANCE_SIZE, 1> appearance;
     };
 }
