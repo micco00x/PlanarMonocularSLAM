@@ -12,3 +12,4 @@ Note that the current `Makefile` is using as path for Eigen
 `/usr/local/include/eigen3`, change it accordingly to the right path on
 your system.
 To generate the plots of the final result, run the script `matlab/plot_trajectories.m`.
+A slightly more detailed description of the project is available [here](https://github.com/micco00x/ProbabilisticRoboticsReport/blob/master/report.pdf).
