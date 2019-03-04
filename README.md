@@ -11,3 +11,4 @@ make
 Note that the current `Makefile` is using as path for Eigen
 `/usr/local/include/eigen3`, change it accordingly to the right path on
 your system.
+To generate the plots of the final result, run the script `matlab/plot_trajectories.m`.
